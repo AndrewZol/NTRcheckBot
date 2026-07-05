@@ -224,7 +224,7 @@ async def search_product_by_name(self, product_name: str):
         url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
         
         headers = {
-            "User-Agent": "YourBotName/1.0 (ваш-email@example.com)"
+            "User-Agent": "Nutricheckbot/1.0 (merimeeev@gmail.com)"
         }
         
         try:
