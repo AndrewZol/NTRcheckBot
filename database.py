@@ -273,70 +273,92 @@ class Database:
     # =====================================================
 
     async def search_product_by_deepseek(self, product_name: str):
-        """Ищет КБЖУ продукта через DeepSeek API (резервный источник)."""
-        import os
-        
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            print("⚠️ DEEPSEEK_API_KEY не найден в переменных окружения")
-            return []
-        
-        url = "https://api.deepseek.com/v1/chat/completions"
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        prompt = f"""Ты — помощник по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
-        
-Верни данные в строгом JSON формате (без лишнего текста, только JSON):
+    """Ищет КБЖУ продукта через DeepSeek API (резервный источник)."""
+    import os
+    
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        print("⚠️ DEEPSEEK_API_KEY не найден в переменных окружения")
+        return []
+    
+    url = "https://api.deepseek.com/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    prompt = f"""Ты — помощник по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
+
+Твоя задача:
+1. Если ты знаешь точные данные для этого продукта — верни их.
+2. Если точных данных нет, но есть данные для похожего продукта или общего типа (например, "яблоко" для "яблоко Гала") — используй их.
+3. Если данных совсем нет — дай разумную оценку, указав, что это приблизительное значение.
+
+Верни ответ в строгом JSON формате. Используй поле "source" для указания источника:
+- "source": "known" — если ты уверен в данных
+- "source": "estimated" — если это приблизительная оценка
+
+Пример ответа для точных данных:
 [
     {{
         "id": "deepseek_1",
-        "name": "Название продукта на русском",
-        "calories": 100.0,
-        "protein": 5.0,
-        "fat": 3.0,
-        "carbs": 15.0,
-        "barcode": ""
+        "name": "Яблоко Гала",
+        "calories": 47.0,
+        "protein": 0.4,
+        "fat": 0.4,
+        "carbs": 9.8,
+        "barcode": "",
+        "source": "known"
     }}
 ]
 
-Если точных данных нет — дай примерные средние значения для этого типа продукта.
-Укажи вес на 100 г продукта.
-Не добавляй пояснений, только JSON массив."""
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "Ты — помощник по питанию. Отвечай только JSON массивами."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 500
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
-                        print(f"🤖 DeepSeek ответ: {content[:200]}...")
-                        
-                        try:
-                            result = json.loads(content)
-                            if isinstance(result, list):
-                                return result
-                            else:
-                                return [result]
-                        except json.JSONDecodeError:
-                            print(f"❌ Не удалось распарсить JSON из DeepSeek: {content}")
-                            return []
-                    else:
-                        print(f"❌ DeepSeek API ошибка: {response.status}")
+Пример ответа для приблизительных данных:
+[
+    {{
+        "id": "deepseek_1",
+        "name": "Яблоко (среднее)",
+        "calories": 52.0,
+        "protein": 0.3,
+        "fat": 0.2,
+        "carbs": 14.0,
+        "barcode": "",
+        "source": "estimated"
+    }}
+]
+
+ВАЖНО: Всегда давай ответ в JSON массиве, даже если это оценка. Не добавляй пояснений вне JSON."""
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "Ты — помощник по питанию. Отвечай только JSON массивами с полем source."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 500
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
+                    print(f"🤖 DeepSeek ответ: {content[:200]}...")
+                    
+                    try:
+                        result = json.loads(content)
+                        if isinstance(result, list):
+                            return result
+                        else:
+                            return [result]
+                    except json.JSONDecodeError:
+                        print(f"❌ Не удалось распарсить JSON из DeepSeek: {content}")
                         return []
-        except Exception as e:
-            print(f"❌ Ошибка при запросе к DeepSeek: {e}")
-            return []
+                else:
+                    print(f"❌ DeepSeek API ошибка: {response.status}")
+                    return []
+    except Exception as e:
+        print(f"❌ Ошибка при запросе к DeepSeek: {e}")
+        return []
