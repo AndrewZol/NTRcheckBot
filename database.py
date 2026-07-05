@@ -8,12 +8,12 @@ class Database:
         self.pool = None
 
     async def connect(self):
-    self.pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        timeout=10.0,
-        max_inactive_connection_lifetime=300.0,
-        statement_cache_size=0  # <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ!
-    )
+        self.pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            timeout=10.0,
+            max_inactive_connection_lifetime=300.0,
+            statement_cache_size=0
+        )
 
     async def create_tables(self):
         async with self.pool.acquire() as conn:
@@ -194,7 +194,7 @@ class Database:
         """Ищет продукты по названию через Open Food Facts API."""
         from urllib.parse import quote
         encoded_name = quote(product_name)
-        url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_name}&search_simple=1&action=process&json=1&page_size=5"
+        url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_name}&search_simple=1&action=process&json=1&page_size=5&lc=ru"
         
         print(f"🔍 Запрос к API: {url}")
         
@@ -213,14 +213,15 @@ class Database:
                         formatted_products = []
                         for p in products:
                             nutriments = p.get('nutriments', {})
+                            product_id = p.get('_id', 0)
                             formatted_products.append({
-                                'id': int(p.get('_id', 0)),
+                                'id': str(product_id),
                                 'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
                                 'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
                                 'protein': nutriments.get('proteins_100g', 0),
                                 'fat': nutriments.get('fat_100g', 0),
                                 'carbs': nutriments.get('carbohydrates_100g', 0),
-                                'barcode': p.get('_id', ''),
+                                'barcode': str(product_id) if product_id else '',
                             })
                         return formatted_products
                     else:
@@ -249,8 +250,9 @@ class Database:
                         if data.get('status') == 1:
                             p = data['product']
                             nutriments = p.get('nutriments', {})
+                            product_id = p.get('_id', 0)
                             return [{
-                                'id': p.get('_id', 0),
+                                'id': str(product_id),
                                 'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
                                 'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
                                 'protein': nutriments.get('proteins_100g', 0),
