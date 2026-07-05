@@ -1,4 +1,5 @@
 import asyncpg
+import aiohttp  # <-- ДОБАВЬТЕ ЭТУ СТРОКУ
 from datetime import datetime, date
 from config import DATABASE_URL
 
@@ -76,14 +77,14 @@ class Database:
                 ON CONFLICT (user_id) DO NOTHING
             ''', user_id, username)
 
-    # Поиск продукта по штрих-коду
+    # Поиск продукта по штрих-коду (локальная БД)
     async def find_product_by_barcode(self, barcode: str):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
                 'SELECT * FROM products WHERE barcode = $1', barcode
             )
 
-    # Поиск продукта по названию
+    # Поиск продукта по названию (локальная БД)
     async def find_products_by_name(self, name: str):
         async with self.pool.acquire() as conn:
             return await conn.fetch(
@@ -180,48 +181,17 @@ class Database:
         async with self.pool.acquire() as conn:
             return await conn.fetch('SELECT * FROM meal_types ORDER BY id')
 
-# Подключение библиотеки
-async def search_product_by_name(self, product_name: str):
+    # =====================================================
+    # НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С OPEN FOOD FACTS API
+    # =====================================================
+
+    async def search_product_by_name(self, product_name: str):
         """Ищет продукты по названию через Open Food Facts API."""
-        # Кодируем название для URL (заменяем пробелы на %20 и т.д.)
-        encoded_name = product_name.replace(" ", "%20")
-        # Используем эндпоинт для автоматического поиска
+        from urllib.parse import quote
+        encoded_name = quote(product_name)
         url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_name}&search_simple=1&action=process&json=1&page_size=5"
         
-        headers = {
-            "User-Agent": "YourBotName/1.0 (ваш-email@example.com)"  # Замените на свои данные
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        products = data.get('products', [])
-                        # Преобразуем ответ API в единый формат, как у вашей БД
-                        formatted_products = []
-                        for p in products:
-                            # Извлекаем нужные нутриенты
-                            nutriments = p.get('nutriments', {})
-                            formatted_products.append({
-                                'id': p.get('_id', 0),
-                                'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
-                                'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
-                                'protein': nutriments.get('proteins_100g', 0),
-                                'fat': nutriments.get('fat_100g', 0),
-                                'carbs': nutriments.get('carbohydrates_100g', 0),
-                                'barcode': p.get('_id', ''), # ID продукта часто является штрих-кодом
-                            })
-                        return formatted_products
-                    else:
-                        return []
-        except Exception as e:
-            print(f"Ошибка при поиске в Open Food Facts: {e}")
-            return []
-
-    async def search_product_by_barcode(self, barcode: str):
-        """Ищет продукт по штрих-коду через Open Food Facts API."""
-        url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
+        print(f"🔍 Запрос к API: {url}")
         
         headers = {
             "User-Agent": "Nutricheckbot/1.0 (merimeeev@gmail.com)"
@@ -230,9 +200,48 @@ async def search_product_by_name(self, product_name: str):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
+                    print(f"📡 Статус ответа API: {response.status}")
                     if response.status == 200:
                         data = await response.json()
-                        if data.get('status') == 1:  # Продукт найден
+                        products = data.get('products', [])
+                        print(f"📦 Найдено продуктов: {len(products)}")
+                        formatted_products = []
+                        for p in products:
+                            nutriments = p.get('nutriments', {})
+                            formatted_products.append({
+                                'id': p.get('_id', 0),
+                                'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
+                                'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
+                                'protein': nutriments.get('proteins_100g', 0),
+                                'fat': nutriments.get('fat_100g', 0),
+                                'carbs': nutriments.get('carbohydrates_100g', 0),
+                                'barcode': p.get('_id', ''),
+                            })
+                        return formatted_products
+                    else:
+                        print(f"⚠️ API вернул статус: {response.status}")
+                        return []
+        except Exception as e:
+            print(f"❌ Ошибка при поиске в Open Food Facts: {e}")
+            return []
+
+    async def search_product_by_barcode(self, barcode: str):
+        """Ищет продукт по штрих-коду через Open Food Facts API."""
+        url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
+        
+        print(f"🔍 Запрос по штрих-коду: {url}")
+        
+        headers = {
+            "User-Agent": "Nutricheckbot/1.0 (merimeeev@gmail.com)"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    print(f"📡 Статус ответа API (штрих-код): {response.status}")
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('status') == 1:
                             p = data['product']
                             nutriments = p.get('nutriments', {})
                             return [{
@@ -246,5 +255,5 @@ async def search_product_by_name(self, product_name: str):
                             }]
                     return []
         except Exception as e:
-            print(f"Ошибка при поиске по штрих-коду: {e}")
+            print(f"❌ Ошибка при поиске по штрих-коду: {e}")
             return []
