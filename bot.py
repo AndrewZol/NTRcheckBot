@@ -141,11 +141,13 @@ async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTER_PRODUCT
 
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print(f"📩 Получено сообщение: {update.message.text}")
+    print("=" * 50)
+    print("📩 [1] ПОЛУЧЕНО СООБЩЕНИЕ")
+    print(f"📩 Текст: {update.message.text}")
+    print("=" * 50)
+    
     # Если прислали фото
     if update.message.photo:
-        # Здесь должна быть логика распознавания штрих-кода
-        # Пока заглушка — распознаём только если есть подпись к фото
         await update.message.reply_text(
             "⚠️ Функция распознавания штрих-кода пока в разработке.\n"
             "Пожалуйста, напиши название продукта текстом."
@@ -157,24 +159,37 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['search_query'] = product_name
 
     # 1. Сначала ищем в локальной базе
+    print("🔍 [2] ПОИСК В ЛОКАЛЬНОЙ БАЗЕ")
     local_products = await db.find_products_by_name(product_name)
+    print(f"🔍 Найдено в локальной БД: {len(local_products)}")
 
     if local_products:
-        # Если нашли в локальной БД — показываем их
-        await show_product_list(update, context, local_products)
+        print("✅ Использую локальные продукты")
+        await show_product_list(update, context, local_products, source="local")
         return SELECT_PRODUCT_FROM_LIST
 
     # 2. Если локально не нашли, ищем через Open Food Facts API
+    print("🌐 [3] ПОИСК В OPEN FOOD FACTS API")
     await update.message.reply_text("🔍 Ищу в глобальной базе Open Food Facts...")
     api_products = await db.search_product_by_name(product_name)
-
+    
+    print(f"🌐 Найдено в API: {len(api_products) if api_products else 0}")
+    
     if api_products:
-        # Сохраняем ВЕСЬ список API-продуктов в контекст для последующего выбора
+        # Выводим ID найденных продуктов
+        print("🌐 ID продуктов из API:")
+        for idx, p in enumerate(api_products):
+            print(f"   {idx+1}. ID: {p['id']}, Название: {p['name']}")
+        
+        # Сохраняем ВЕСЬ список API-продуктов в контекст
         context.user_data['api_products'] = api_products
-        await show_product_list(update, context, api_products)
+        print("✅ [4] API-продукты сохранены в context.user_data['api_products']")
+        print(f"✅ Всего сохранено: {len(context.user_data['api_products'])} продуктов")
+        
+        await show_product_list(update, context, api_products, source="api")
         return SELECT_PRODUCT_FROM_LIST
     else:
-        # 3. Если продукт не найден нигде — предлагаем ввести вручную
+        print("❌ [5] ПРОДУКТ НЕ НАЙДЕН НИГДЕ")
         await update.message.reply_text(
             "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts.\n\n"
             "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
@@ -185,11 +200,15 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['product_name'] = product_name
         return MANUAL_ENTRY
 
-async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products):
+async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products, source="unknown"):
     """Вспомогательная функция для отображения списка продуктов."""
+    print(f"📋 [6] ПОКАЗ СПИСКА ПРОДУКТОВ (источник: {source})")
+    print(f"📋 Количество продуктов в списке: {len(products)}")
+    
     if len(products) == 1:
         # Если один продукт — сразу спрашиваем вес
         context.user_data['product_id'] = products[0]['id']
+        print(f"📋 Выбран единственный продукт: ID={products[0]['id']}, {products[0]['name']}")
         await update.message.reply_text(
             f"📦 {products[0]['name']}\n"
             f"🔥 {products[0]['calories']} ккал | "
@@ -204,35 +223,70 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard = []
     for idx, product in enumerate(products):
         btn_text = f"{idx+1}. {product['name']} ({product['calories']} ккал/100г)"
+        callback_data = f"prod_{product['id']}"
+        print(f"📋 Кнопка {idx+1}: ID={product['id']}, callback={callback_data}")
         keyboard.append([
-            InlineKeyboardButton(btn_text, callback_data=f"prod_{product['id']}")
+            InlineKeyboardButton(btn_text, callback_data=callback_data)
         ])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         "🔍 Найдено несколько продуктов. Выбери нужный:",
         reply_markup=reply_markup
     )
+    print("✅ [7] СПИСОК ПОКАЗАН, ОЖИДАЕМ ВЫБОР")
     return SELECT_PRODUCT_FROM_LIST
 
 async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("=" * 50)
+    print("🎯 [8] ПОЛУЧЕН ВЫБОР ПРОДУКТА")
+    
     query = update.callback_query
     await query.answer()
     
     # Получаем ID продукта из callback_data
-    product_id = int(query.data.split('_')[1])
+    callback_data = query.data
+    product_id = int(callback_data.split('_')[1])
+    print(f"🎯 callback_data: {callback_data}")
+    print(f"🎯 Извлечён product_id: {product_id}")
+    
     context.user_data['product_id'] = product_id
+    print(f"🎯 product_id сохранён в context.user_data")
     
     # Пытаемся найти продукт в локальной БД
+    print("🔍 [9] ПОИСК В ЛОКАЛЬНОЙ БД ПО ID")
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
+    if product:
+        print(f"✅ [10] Продукт НАЙДЕН в локальной БД: {product['name']}")
+        await query.edit_message_text(
+            f"📦 {product['name']}\n"
+            f"🔥 {product['calories']} ккал | "
+            f"🥩 {product['protein']}г | "
+            f"🧈 {product['fat']}г | "
+            f"🍞 {product['carbs']}г на 100 г\n\n"
+            "Сколько граммов ты съел?"
+        )
+        return ENTER_WEIGHT
+    
+    print("⚠️ [10] Продукт НЕ НАЙДЕН в локальной БД")
+    
     # Если продукта нет в локальной БД — ищем в сохранённых из API
-    if not product:
-        api_products = context.user_data.get('api_products', [])
-        print(f"🔍 Ищем в API-продуктах (ID: {product_id})")
-        for p in api_products:
-            if p['id'] == product_id:
-                # Сохраняем продукт в локальную БД
+    api_products = context.user_data.get('api_products', [])
+    print(f"🔍 [11] Ищем в API-продуктах (всего: {len(api_products)})")
+    print(f"🔍 Ищем ID: {product_id}")
+    print(f"🔍 Доступные ID: {[p['id'] for p in api_products]}")
+    
+    found_in_api = False
+    for p in api_products:
+        if p['id'] == product_id:
+            found_in_api = True
+            print(f"✅ [12] Продукт НАЙДЕН в API: {p['name']}")
+            print(f"📦 Данные продукта: {p}")
+            
+            # Сохраняем продукт в локальную БД
+            print("💾 [13] СОХРАНЕНИЕ В ЛОКАЛЬНУЮ БД")
+            try:
                 product = await db.add_product(
                     name=p['name'],
                     barcode=p['barcode'],
@@ -242,27 +296,35 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     carbs=p['carbs'],
                     is_custom=False
                 )
+                print(f"✅ [14] Продукт сохранён в локальную БД с ID: {product['id']}")
+                
                 # Перезапрашиваем из БД, чтобы получить правильный id
-                product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
-                break
+                async with db.pool.acquire() as conn:
+                    product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
+                print(f"✅ [15] Данные из БД: {product['name']}, {product['calories']} ккал")
+                
+                await query.edit_message_text(
+                    f"📦 {product['name']}\n"
+                    f"🔥 {product['calories']} ккал | "
+                    f"🥩 {product['protein']}г | "
+                    f"🧈 {product['fat']}г | "
+                    f"🍞 {product['carbs']}г на 100 г\n\n"
+                    "Сколько граммов ты съел?"
+                )
+                return ENTER_WEIGHT
+            except Exception as e:
+                print(f"❌ ОШИБКА при сохранении в БД: {e}")
+                await query.edit_message_text(
+                    f"❌ Ошибка сохранения продукта: {e}"
+                )
+                return ConversationHandler.END
     
-    # Если продукт всё ещё None — ошибка
-    if not product:
+    if not found_in_api:
+        print("❌ [16] Продукт НЕ НАЙДЕН ни в локальной БД, ни в API")
         await query.edit_message_text(
             "❌ Ошибка: продукт не найден. Попробуйте снова /add"
         )
         return ConversationHandler.END
-    
-    # Показываем продукт и запрашиваем вес
-    await query.edit_message_text(
-        f"📦 {product['name']}\n"
-        f"🔥 {product['calories']} ккал | "
-        f"🥩 {product['protein']}г | "
-        f"🧈 {product['fat']}г | "
-        f"🍞 {product['carbs']}г на 100 г\n\n"
-        "Сколько граммов ты съел?"
-    )
-    return ENTER_WEIGHT
 
 async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
