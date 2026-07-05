@@ -496,6 +496,15 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
     print("⚖️ ПОЛУЧЕН ВЕС")
     print(f"⚖️ Текст: {update.message.text}")
+    print(f"⚖️ context.user_data: {context.user_data}")
+    
+    # Проверяем, не нажали ли "Назад"
+    if update.callback_query and update.callback_query.data == "menu_back":
+        query = update.callback_query
+        await query.answer()
+        context.user_data.clear()
+        await show_main_menu(update, context)
+        return ConversationHandler.END
     
     try:
         weight = float(update.message.text.replace(',', '.'))
@@ -507,24 +516,24 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     product_id = context.user_data.get('product_id')
     meal_type_id = context.user_data.get('meal_type_id')
     
-    print(f"⚖️ product_id: {product_id}")
-    print(f"⚖️ meal_type_id: {meal_type_id}")
+    print(f"⚖️ product_id из контекста: {product_id}")
+    print(f"⚖️ meal_type_id из контекста: {meal_type_id}")
     
     if not product_id:
-        print("❌ ОШИБКА: нет product_id")
-        await update.message.reply_text("❌ Ошибка: продукт не найден.")
+        print("❌ ОШИБКА: product_id не найден в контексте!")
+        await update.message.reply_text("❌ Ошибка: продукт не найден. Попробуйте /add")
         return ConversationHandler.END
     
     if not meal_type_id:
-        print("❌ ОШИБКА: нет meal_type_id")
-        await update.message.reply_text("❌ Ошибка: приём пищи не выбран.")
+        print("❌ ОШИБКА: meal_type_id не найден в контексте!")
+        await update.message.reply_text("❌ Ошибка: приём пищи не выбран. Попробуйте /add")
         return ConversationHandler.END
     
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
     if not product:
-        print("❌ ОШИБКА: продукт не найден в БД")
+        print("❌ ОШИБКА: продукт не найден в БД!")
         await update.message.reply_text("❌ Ошибка: продукт не найден.")
         return ConversationHandler.END
     
@@ -533,7 +542,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fat = (product['fat'] / 100) * weight
     carbs = (product['carbs'] / 100) * weight
     
-    print(f"⚖️ Пересчитано: {calories:.1f} ккал")
+    print(f"⚖️ Пересчитано: {calories:.1f} ккал, {protein:.1f}г б, {fat:.1f}г ж, {carbs:.1f}г у")
     
     try:
         await db.add_meal_entry(
@@ -546,7 +555,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fat=fat,
             carbs=carbs
         )
-        print("✅ ЗАПИСЬ СОХРАНЕНА!")
+        print("✅ ЗАПИСЬ СОХРАНЕНА В БД!")
         
         await update.message.reply_text(
             format_nutrition(product['name'], weight, calories, protein, fat, carbs)
@@ -557,7 +566,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except Exception as e:
         print(f"❌ ОШИБКА СОХРАНЕНИЯ: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
         return ConversationHandler.END
 
 # --- ИСТОРИЯ ---
