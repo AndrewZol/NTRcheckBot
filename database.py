@@ -117,18 +117,23 @@ class Database:
             ''', barcode, name, calories, protein, fat, carbs, is_custom)
 
     # Сохранение приёма пищи
-    async def add_meal_entry(self, user_id: int, product_id: int, 
-                             meal_type_id: int, weight: float,
-                             calories: float, protein: float, 
-                             fat: float, carbs: float):
-        async with self.pool.acquire() as conn:
-            await conn.execute('''
-                INSERT INTO meal_entries 
-                (user_id, product_id, meal_type_id, date, weight_grams, 
-                 calories, protein, fat, carbs)
-                VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, $6, $7, $8)
-            ''', user_id, product_id, meal_type_id, weight, 
-                 calories, protein, fat, carbs)
+   async def add_meal_entry(self, user_id: int, product_id: int, 
+                         meal_type_id: int, weight: float,
+                         calories: float, protein: float, 
+                         fat: float, carbs: float):
+    # Получаем московскую дату
+    from datetime import datetime, timedelta
+    moscow_time = datetime.utcnow() + timedelta(hours=3)
+    moscow_date = moscow_time.date()
+    
+    async with self.pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO meal_entries 
+            (user_id, product_id, meal_type_id, date, weight_grams, 
+             calories, protein, fat, carbs)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ''', user_id, product_id, meal_type_id, moscow_date, weight, 
+             calories, protein, fat, carbs)
 
     # Получение сводки за день
     async def get_daily_summary(self, user_id: int, target_date: date):
