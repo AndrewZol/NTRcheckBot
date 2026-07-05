@@ -140,21 +140,114 @@ async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ENTER_PRODUCT
 
+async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
+    """Ищет продукт по штрих-коду (локально, затем в Open Food Facts)."""
+    print(f"🔍 [BARCODE] ПОИСК ПО ШТРИХ-КОДУ: {barcode}")
+    
+    # 1. Ищем в локальной базе
+    product = await db.find_product_by_barcode(barcode)
+    if product:
+        print(f"✅ Найден в локальной БД: {product['name']}")
+        context.user_data['product_id'] = product['id']
+        await update.message.reply_text(
+            f"📦 {product['name']}\n"
+            f"🔥 {product['calories']} ккал | "
+            f"🥩 {product['protein']}г | "
+            f"🧈 {product['fat']}г | "
+            f"🍞 {product['carbs']}г на 100 г\n\n"
+            "Сколько граммов ты съел?"
+        )
+        return ENTER_WEIGHT
+    
+    # 2. Ищем в Open Food Facts
+    await update.message.reply_text("🌐 Ищу продукт в Open Food Facts...")
+    api_products = await db.search_product_by_barcode(barcode)
+    
+    if api_products:
+        product_data = api_products[0]
+        print(f"✅ Найден в Open Food Facts: {product_data['name']}")
+        
+        # Сохраняем в локальную БД
+        product = await db.add_product(
+            name=product_data['name'],
+            barcode=barcode,
+            calories=product_data['calories'],
+            protein=product_data['protein'],
+            fat=product_data['fat'],
+            carbs=product_data['carbs'],
+            is_custom=False
+        )
+        # Перезапрашиваем из БД
+        async with db.pool.acquire() as conn:
+            product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
+        
+        context.user_data['product_id'] = product['id']
+        await update.message.reply_text(
+            f"📦 {product['name']}\n"
+            f"🔥 {product['calories']} ккал | "
+            f"🥩 {product['protein']}г | "
+            f"🧈 {product['fat']}г | "
+            f"🍞 {product['carbs']}г на 100 г\n\n"
+            "Сколько граммов ты съел?"
+        )
+        return ENTER_WEIGHT
+    
+    # 3. Не найдено
+    await update.message.reply_text(
+        f"❌ Продукт со штрих-кодом {barcode} не найден.\n"
+        "Попробуй ввести название продукта текстом."
+    )
+    return ENTER_PRODUCT
+
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
     print("📩 [1] ПОЛУЧЕНО СООБЩЕНИЕ")
-    print(f"📩 Текст: {update.message.text}")
+    if update.message.photo:
+        print("📩 Это ФОТО")
+    else:
+        print(f"📩 Текст: {update.message.text}")
     print("=" * 50)
     
-    # Если прислали фото
+    # Если прислали фото — пытаемся распознать штрих-код
     if update.message.photo:
-        await update.message.reply_text(
-            "⚠️ Функция распознавания штрих-кода пока в разработке.\n"
-            "Пожалуйста, напиши название продукта текстом."
-        )
-        return ENTER_PRODUCT
+        print("📷 [1.1] ОБРАБОТКА ФОТО")
+        await update.message.reply_text("📷 Распознаю штрих-код...")
+        
+        try:
+            # Скачиваем фото
+            photo_file = await update.message.photo[-1].get_file()
+            photo_bytes = await photo_file.download_as_bytearray()
+            
+            # Распознаём штрих-код
+            from pyzbar.pyzbar import decode
+            from PIL import Image
+            import io
+            
+            image = Image.open(io.BytesIO(photo_bytes))
+            decoded_objects = decode(image)
+            
+            if not decoded_objects:
+                await update.message.reply_text(
+                    "❌ Не удалось распознать штрих-код на фото.\n"
+                    "Попробуй сфотографировать чётче или введи название продукта текстом."
+                )
+                return ENTER_PRODUCT
+            
+            # Берём первый найденный штрих-код
+            barcode = decoded_objects[0].data.decode('utf-8')
+            print(f"📷 Распознан штрих-код: {barcode}")
+            
+            # Ищем продукт по штрих-коду
+            return await search_by_barcode(update, context, barcode)
+            
+        except Exception as e:
+            print(f"❌ Ошибка при распознавании штрих-кода: {e}")
+            await update.message.reply_text(
+                "❌ Ошибка при обработке фото. Попробуй ввести название продукта текстом."
+            )
+            return ENTER_PRODUCT
     
-    # Если прислали текст
+    # Если прислали текст — ищем по названию
     product_name = update.message.text.strip()
     context.user_data['search_query'] = product_name
 
