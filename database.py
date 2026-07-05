@@ -1,5 +1,5 @@
 import asyncpg
-import aiohttp  # <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+import aiohttp
 from datetime import datetime, date
 from config import DATABASE_URL
 
@@ -21,10 +21,10 @@ class Database:
                 )
             ''')
             
-            # Таблица продуктов
+            # Таблица продуктов (id - BIGSERIAL)
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS products (
-                    id SERIAL PRIMARY KEY,
+                    id BIGSERIAL PRIMARY KEY,
                     barcode TEXT UNIQUE,
                     name TEXT NOT NULL,
                     calories REAL,
@@ -51,12 +51,12 @@ class Database:
                 ON CONFLICT (name) DO NOTHING
             ''')
             
-            # Таблица записей о приёмах пищи
+            # Таблица записей о приёмах пищи (product_id - BIGINT)
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS meal_entries (
                     id SERIAL PRIMARY KEY,
                     user_id BIGINT REFERENCES users(user_id),
-                    product_id INTEGER REFERENCES products(id),
+                    product_id BIGINT REFERENCES products(id),
                     meal_type_id INTEGER REFERENCES meal_types(id),
                     date DATE DEFAULT CURRENT_DATE,
                     weight_grams REAL,
