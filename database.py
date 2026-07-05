@@ -212,7 +212,7 @@ class Database:
                         for p in products:
                             nutriments = p.get('nutriments', {})
                             formatted_products.append({
-                                'id': p.get('_id', 0),
+                                'id': int(p.get('_id', 0)),
                                 'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
                                 'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
                                 'protein': nutriments.get('proteins_100g', 0),
