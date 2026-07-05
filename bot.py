@@ -110,15 +110,21 @@ async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    if query.data == "menu_add":
+    action = query.data
+    
+    # menu_back обрабатывается в ConversationHandler, игнорируем здесь
+    if action == "menu_back":
+        return
+    
+    if action == "menu_add":
         await add_start(update, context)
-    elif query.data == "menu_history":
+    elif action == "menu_history":
         await history(update, context)
-    elif query.data == "menu_week":
+    elif action == "menu_week":
         await week(update, context)
-    elif query.data == "menu_export":
+    elif action == "menu_export":
         await export_csv(update, context)
-    elif query.data == "menu_cancel":
+    elif action == "menu_cancel":
         await cancel(update, context)
 
 # --- КОМАНДЫ ---
