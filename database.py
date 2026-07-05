@@ -8,10 +8,12 @@ class Database:
         self.pool = None
 
     async def connect(self):
-        self.pool = await asyncpg.create_pool(
-    DATABASE_URL,
-    timeout=10.0,  # <-- ДОБАВЬТЕ ТАЙМАУТ В 10 СЕКУНД
-    max_inactive_connection_lifetime=300.0)
+    self.pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        timeout=10.0,
+        max_inactive_connection_lifetime=300.0,
+        statement_cache_size=0  # <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ!
+    )
 
     async def create_tables(self):
         async with self.pool.acquire() as conn:
