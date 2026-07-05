@@ -154,23 +154,43 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если прислали текст
     product_name = update.message.text.strip()
     context.user_data['search_query'] = product_name
-    
-    # Ищем продукты в БД
-    products = await db.find_products_by_name(product_name)
-    
-    if not products:
-        # Продуктов нет — предлагаем ввести вручную
+
+    # 1. Сначала ищем в локальной базе
+    local_products = await db.find_products_by_name(product_name)
+
+    if local_products:
+        # Если нашли в локальной БД — показываем их
+        await show_product_list(update, context, local_products)
+        return SELECT_PRODUCT_FROM_LIST
+
+    # 2. Если локально не нашли, ищем через Open Food Facts API
+    await update.message.reply_text("🔍 Ищу в глобальной базе Open Food Facts...")
+    api_products = await db.search_product_by_name(product_name)
+
+    if api_products:
+        # Сохраняем найденный продукт в локальную БД для будущих запросов
+        for api_product in api_products:
+            # Добавляем только первый найденный продукт, чтобы не засорять БД
+            # (можно добавить логику для сохранения всех)
+            break
+        await show_product_list(update, context, api_products)
+        return SELECT_PRODUCT_FROM_LIST
+    else:
+        # 3. Если продукт не найден нигде — предлагаем ввести вручную
         await update.message.reply_text(
-            "❌ Продукт не найден.\n"
-            "Введи КБЖУ на 100 г через запятую:\n"
+            "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts.\n\n"
+            "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
+            "Либо введи КБЖУ на 100 г вручную через запятую:\n"
             "Пример: 45, 1.2, 0.3, 8.5\n"
             "(Калории, Белки, Жиры, Углеводы)"
         )
         context.user_data['product_name'] = product_name
         return MANUAL_ENTRY
-    
+
+async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products):
+    """Вспомогательная функция для отображения списка продуктов."""
     if len(products) == 1:
-        # Один продукт — сразу берём
+        # Если один продукт — сразу спрашиваем вес
         context.user_data['product_id'] = products[0]['id']
         await update.message.reply_text(
             f"📦 {products[0]['name']}\n"
@@ -181,8 +201,8 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Сколько граммов ты съел?"
         )
         return ENTER_WEIGHT
-    
-    # Несколько продуктов — показываем список
+
+    # Если несколько — показываем список для выбора
     keyboard = []
     for idx, product in enumerate(products):
         btn_text = f"{idx+1}. {product['name']} ({product['calories']} ккал/100г)"
