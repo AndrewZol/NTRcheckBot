@@ -245,9 +245,12 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Получаем ID продукта из callback_data
     callback_data = query.data
-    product_id = int(callback_data.split('_')[1])
+    product_id_str = callback_data.split('_')[1]  # Сохраняем как строку
+    product_id = int(product_id_str)
+    
     print(f"🎯 callback_data: {callback_data}")
-    print(f"🎯 Извлечён product_id: {product_id}")
+    print(f"🎯 Извлечён product_id (строка): {product_id_str}")
+    print(f"🎯 Извлечён product_id (число): {product_id}")
     
     context.user_data['product_id'] = product_id
     print(f"🎯 product_id сохранён в context.user_data")
@@ -274,12 +277,13 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если продукта нет в локальной БД — ищем в сохранённых из API
     api_products = context.user_data.get('api_products', [])
     print(f"🔍 [11] Ищем в API-продуктах (всего: {len(api_products)})")
-    print(f"🔍 Ищем ID: {product_id}")
-    print(f"🔍 Доступные ID: {[p['id'] for p in api_products]}")
+    print(f"🔍 Ищем ID (строка): {product_id_str}")
+    print(f"🔍 Доступные ID: {[str(p['id']) for p in api_products]}")
     
     found_in_api = False
     for p in api_products:
-        if p['id'] == product_id:
+        # Сравниваем как СТРОКИ!
+        if str(p['id']) == product_id_str:
             found_in_api = True
             print(f"✅ [12] Продукт НАЙДЕН в API: {p['name']}")
             print(f"📦 Данные продукта: {p}")
@@ -289,7 +293,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 product = await db.add_product(
                     name=p['name'],
-                    barcode=p['barcode'],
+                    barcode=str(p['barcode']),
                     calories=p['calories'],
                     protein=p['protein'],
                     fat=p['fat'],
