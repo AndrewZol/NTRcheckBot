@@ -830,6 +830,26 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
     
     print("🤖 Бот запущен!")
+    
+    # --- ЗАПУСКАЕМ ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ---
+    async def start_web_server():
+        from aiohttp import web
+        
+        async def health_check(request):
+            return web.Response(text="OK")
+        
+        app_web = web.Application()
+        app_web.router.add_get('/', health_check)
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 10000)
+        await site.start()
+        print("🌐 Веб-сервер для health check запущен на порту 10000")
+    
+    # Запускаем веб-сервер
+    loop.run_until_complete(start_web_server())
+    
+    # Запускаем бота
     app.run_polling()
 
 if __name__ == '__main__':
