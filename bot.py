@@ -163,29 +163,26 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_product_list(update, context, local_products)
         return SELECT_PRODUCT_FROM_LIST
 
-    # 2. Если локально не нашли, ищем через Open Food Facts API
-    await update.message.reply_text("🔍 Ищу в глобальной базе Open Food Facts...")
-    api_products = await db.search_product_by_name(product_name)
+   # 2. Если локально не нашли, ищем через Open Food Facts API
+await update.message.reply_text("🔍 Ищу в глобальной базе Open Food Facts...")
+api_products = await db.search_product_by_name(product_name)
 
-    if api_products:
-        # Сохраняем найденный продукт в локальную БД для будущих запросов
-        for api_product in api_products:
-            # Добавляем только первый найденный продукт, чтобы не засорять БД
-            # (можно добавить логику для сохранения всех)
-            break
-        await show_product_list(update, context, api_products)
-        return SELECT_PRODUCT_FROM_LIST
-    else:
-        # 3. Если продукт не найден нигде — предлагаем ввести вручную
-        await update.message.reply_text(
-            "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts.\n\n"
-            "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
-            "Либо введи КБЖУ на 100 г вручную через запятую:\n"
-            "Пример: 45, 1.2, 0.3, 8.5\n"
-            "(Калории, Белки, Жиры, Углеводы)"
-        )
-        context.user_data['product_name'] = product_name
-        return MANUAL_ENTRY
+if api_products:
+    # Сохраняем ВЕСЬ список API-продуктов в контекст для последующего выбора
+    context.user_data['api_products'] = api_products
+    await show_product_list(update, context, api_products)
+    return SELECT_PRODUCT_FROM_LIST
+else:
+    # 3. Если продукт не найден нигде — предлагаем ввести вручную
+    await update.message.reply_text(
+        "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts.\n\n"
+        "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
+        "Либо введи КБЖУ на 100 г вручную через запятую:\n"
+        "Пример: 45, 1.2, 0.3, 8.5\n"
+        "(Калории, Белки, Жиры, Углеводы)"
+    )
+    context.user_data['product_name'] = product_name
+    return MANUAL_ENTRY
 
 async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products):
     """Вспомогательная функция для отображения списка продуктов."""
