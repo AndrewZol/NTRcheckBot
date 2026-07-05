@@ -715,7 +715,9 @@ def main():
     app.add_handler(CommandHandler('week', week))
     app.add_handler(CommandHandler('export', export_csv))
     app.add_handler(CommandHandler('cancel', cancel))
-    app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
+    
+    # НЕ ДОБАВЛЯЙТЕ ГЛОБАЛЬНЫЙ CallbackQueryHandler для menu_back!
+    # Вместо этого, кнопки главного меню обрабатываются через conv_handler
     
     print("🤖 Бот запущен!")
     
