@@ -680,7 +680,9 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     else:
-        target_date = date.today()
+        # Используем московскую дату (UTC+3)
+        from datetime import datetime, timedelta
+        target_date = (datetime.utcnow() + timedelta(hours=3)).date()
     
     entries = await db.get_daily_summary(user_id, target_date)
     totals = await db.get_daily_totals(user_id, target_date)
@@ -699,7 +701,6 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Показываем главное меню
     await show_main_menu(update, context)
-
 async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     end_date = date.today()
