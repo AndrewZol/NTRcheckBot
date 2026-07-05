@@ -377,9 +377,9 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Сохраняем ID в контекст
     context.user_data['product_id'] = product_id
-    print(f"✅ product_id сохранён в context.user_data: {product_id}")
+    print(f"✅ product_id сохранён: {product_id}")
     
-    # Проверяем, есть ли продукт в локальной БД
+    # Ищем продукт в локальной БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
@@ -397,7 +397,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Сколько граммов ты съел?",
             reply_markup=reply_markup
         )
-        return ENTER_WEIGHT  # <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ
+        return ENTER_WEIGHT  # <-- ЯВНО ВОЗВРАЩАЕМ СОСТОЯНИЕ
     
     # Если нет в локальной БД — ищем в API-продуктах
     api_products = context.user_data.get('api_products', [])
@@ -407,7 +407,6 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(p['id']) == product_id_str:
             print(f"✅ Найден в API: {p['name']}")
             
-            # Сохраняем в локальную БД
             try:
                 product = await db.add_product(
                     name=p['name'],
@@ -437,7 +436,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Сколько граммов ты съел?",
                     reply_markup=reply_markup
                 )
-                return ENTER_WEIGHT  # <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ
+                return ENTER_WEIGHT
             except Exception as e:
                 print(f"❌ Ошибка сохранения: {e}")
                 await query.edit_message_text(f"❌ Ошибка: {e}")
@@ -492,13 +491,6 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("⚖️ ПОЛУЧЕН ВЕС")
     print(f"⚖️ Текст: {update.message.text}")
     
-    if update.callback_query and update.callback_query.data == "menu_back":
-        query = update.callback_query
-        await query.answer()
-        context.user_data.clear()
-        await show_main_menu(update, context)
-        return ConversationHandler.END
-    
     try:
         weight = float(update.message.text.replace(',', '.'))
         print(f"⚖️ Вес: {weight} г")
@@ -514,12 +506,12 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not product_id:
         print("❌ ОШИБКА: нет product_id")
-        await update.message.reply_text("❌ Ошибка: продукт не найден. Попробуйте /add")
+        await update.message.reply_text("❌ Ошибка: продукт не найден.")
         return ConversationHandler.END
     
     if not meal_type_id:
         print("❌ ОШИБКА: нет meal_type_id")
-        await update.message.reply_text("❌ Ошибка: приём пищи не выбран. Попробуйте /add")
+        await update.message.reply_text("❌ Ошибка: приём пищи не выбран.")
         return ConversationHandler.END
     
     async with db.pool.acquire() as conn:
@@ -527,7 +519,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not product:
         print("❌ ОШИБКА: продукт не найден в БД")
-        await update.message.reply_text("❌ Ошибка: продукт не найден. Попробуйте /add")
+        await update.message.reply_text("❌ Ошибка: продукт не найден.")
         return ConversationHandler.END
     
     calories = (product['calories'] / 100) * weight
@@ -554,13 +546,12 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
             format_nutrition(product['name'], weight, calories, protein, fat, carbs)
         )
         
-        # ПОСЛЕ СОХРАНЕНИЯ — чистим и показываем меню
         context.user_data.clear()
         await show_main_menu(update, context)
         return ConversationHandler.END
     except Exception as e:
-        print(f"❌ ОШИБКА: {e}")
-        await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
+        print(f"❌ ОШИБКА СОХРАНЕНИЯ: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {e}")
         return ConversationHandler.END
 
 # --- ИСТОРИЯ ---
