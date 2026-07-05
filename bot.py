@@ -188,10 +188,23 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await show_product_list(update, context, api_products, source="api")
         return SELECT_PRODUCT_FROM_LIST
+    
+    # 3. Если API не нашёл, пробуем DeepSeek
+    print("🤖 [5.1] ПРОБУЕМ НАЙТИ ЧЕРЕЗ DEEPSEEK")
+    await update.message.reply_text("🤖 Ищу в базе DeepSeek (примерные данные)...")
+    
+    deepseek_products = await db.search_product_by_deepseek(product_name)
+    
+    if deepseek_products:
+        print(f"🤖 Найдено через DeepSeek: {len(deepseek_products)}")
+        context.user_data['api_products'] = deepseek_products
+        await show_product_list(update, context, deepseek_products, source="deepseek")
+        return SELECT_PRODUCT_FROM_LIST
     else:
-        print("❌ [5] ПРОДУКТ НЕ НАЙДЕН НИГДЕ")
+        # 4. Если и DeepSeek не нашёл — предлагаем ввести вручную
+        print("❌ [5.2] ПРОДУКТ НЕ НАЙДЕН НИГДЕ")
         await update.message.reply_text(
-            "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts.\n\n"
+            "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts, ни в DeepSeek.\n\n"
             "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
             "Либо введи КБЖУ на 100 г вручную через запятую:\n"
             "Пример: 45, 1.2, 0.3, 8.5\n"
@@ -204,6 +217,9 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     """Вспомогательная функция для отображения списка продуктов."""
     print(f"📋 [6] ПОКАЗ СПИСКА ПРОДУКТОВ (источник: {source})")
     print(f"📋 Количество продуктов в списке: {len(products)}")
+    
+    if source == "deepseek":
+        await update.message.reply_text("🤖 Данные от DeepSeek (примерные, могут отличаться):")
     
     if len(products) == 1:
         # Если один продукт — сразу спрашиваем вес
@@ -245,7 +261,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Получаем ID продукта из callback_data
     callback_data = query.data
-    product_id_str = callback_data.split('_')[1]  # Сохраняем как строку
+    product_id_str = callback_data.split('_')[1]
     product_id = int(product_id_str)
     
     print(f"🎯 callback_data: {callback_data}")
@@ -282,13 +298,11 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     found_in_api = False
     for p in api_products:
-        # Сравниваем как СТРОКИ!
         if str(p['id']) == product_id_str:
             found_in_api = True
             print(f"✅ [12] Продукт НАЙДЕН в API: {p['name']}")
             print(f"📦 Данные продукта: {p}")
             
-            # Сохраняем продукт в локальную БД
             print("💾 [13] СОХРАНЕНИЕ В ЛОКАЛЬНУЮ БД")
             try:
                 product = await db.add_product(
@@ -302,12 +316,10 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 print(f"✅ [14] Продукт сохранён в локальную БД с ID: {product['id']}")
                 
-                # Перезапрашиваем из БД, чтобы получить правильный id
                 async with db.pool.acquire() as conn:
                     product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
                 print(f"✅ [15] Данные из БД: {product['name']}, {product['calories']} ккал")
                 
-                # ВАЖНО: обновляем ID в контексте на правильный из БД!
                 context.user_data['product_id'] = product['id']
                 print(f"✅ [15.1] product_id обновлён в контексте: {product['id']}")
                 
@@ -345,7 +357,6 @@ async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MANUAL_ENTRY
     
-    # Сохраняем продукт как пользовательский
     product_name = context.user_data['product_name']
     product = await db.add_product(
         name=product_name,
@@ -377,7 +388,6 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Введи число (граммы). Например: 150")
         return ENTER_WEIGHT
     
-    # Получаем продукт из контекста
     product_id = context.user_data.get('product_id')
     meal_type_id = context.user_data.get('meal_type_id')
     
@@ -391,7 +401,6 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # Получаем продукт из БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
         print(f"⚖️ Продукт из БД: {product}")
@@ -403,7 +412,6 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
-    # Пересчитываем КБЖУ на вес
     calories = (product['calories'] / 100) * weight
     protein = (product['protein'] / 100) * weight
     fat = (product['fat'] / 100) * weight
@@ -411,7 +419,6 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"⚖️ Пересчитано: {calories:.1f} ккал, {protein:.1f}г б, {fat:.1f}г ж, {carbs:.1f}г у")
     
-    # Сохраняем запись
     try:
         await db.add_meal_entry(
             user_id=update.effective_user.id,
@@ -442,7 +449,6 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
     
-    # Определяем дату
     if args and len(args) > 0:
         try:
             target_date = datetime.strptime(args[0], '%Y-%m-%d').date()
@@ -459,9 +465,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     response = f"📅 Сводка за {target_date.strftime('%d.%m.%Y')}\n\n"
     response += format_history(entries)
-    
-    # Добавляем условную норму (можно хранить в БД)
-    response += "\n\n🎯 Ваша норма (примерная): 1800 ккал"
+    response += f"\n\n🎯 Ваша норма (примерная): 1800 ккал | Осталось: {1800 - totals['total_calories']:.0f} ккал"
     
     await update.message.reply_text(response)
 
@@ -507,7 +511,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"📭 За {target_date.strftime('%d.%m.%Y')} записей нет.")
         return
     
-    # Создаём CSV в памяти
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
     writer.writerow(['Дата', 'Приём пищи', 'Продукт', 'Вес (г)', 
@@ -534,17 +537,14 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 
 def main():
-    # Подключаемся к БД
     import asyncio
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(db.connect())
     loop.run_until_complete(db.create_tables())
     
-    # Создаём приложение
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # ConversationHandler для добавления продукта
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('add', add_start)],
         states={
