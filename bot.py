@@ -91,26 +91,92 @@ def format_history(entries):
     
     return result
 
+# --- КНОПКИ ГЛАВНОГО МЕНЮ ---
+
+async def main_menu_keyboard():
+    """Создаёт клавиатуру с главным меню."""
+    keyboard = [
+        [InlineKeyboardButton("➕ Добавить продукт", callback_data="menu_add")],
+        [InlineKeyboardButton("📊 История за сегодня", callback_data="menu_history")],
+        [InlineKeyboardButton("📈 Статистика за неделю", callback_data="menu_week")],
+        [InlineKeyboardButton("📁 Экспорт CSV", callback_data="menu_export")],
+        [InlineKeyboardButton("❌ Отменить действие", callback_data="menu_cancel")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает главное меню с кнопками."""
+    keyboard = await main_menu_keyboard()
+    
+    # Если есть сообщение для редактирования
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(
+            "📋 Главное меню:",
+            reply_markup=keyboard
+        )
+    else:
+        # Если это новое сообщение
+        await update.message.reply_text(
+            "📋 Главное меню:",
+            reply_markup=keyboard
+        )
+
+async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает нажатия на кнопки главного меню."""
+    query = update.callback_query
+    await query.answer()
+    
+    action = query.data
+    
+    if action == "menu_add":
+        # Перенаправляем на /add
+        await add_start(update, context)
+    elif action == "menu_history":
+        # Перенаправляем на /history
+        await history(update, context)
+    elif action == "menu_week":
+        # Перенаправляем на /week
+        await week(update, context)
+    elif action == "menu_export":
+        # Перенаправляем на /export
+        await export_csv(update, context)
+    elif action == "menu_cancel":
+        # Перенаправляем на /cancel
+        await cancel(update, context)
+
 # --- ОБРАБОТЧИКИ КОМАНД ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await db.register_user(user.id, user.username or "без username")
     
-    await update.message.reply_text(
-        "👋 Привет! Я бот для подсчёта КБЖУ.\n\n"
-        "📌 Команды:\n"
-        "/add — добавить продукт в дневник\n"
-        "/history — показать сводку за сегодня\n"
-        "/history YYYY-MM-DD — за конкретную дату\n"
-        "/week — за последние 7 дней\n"
-        "/export — выгрузить CSV за сегодня\n"
-        "/cancel — отменить текущее действие"
-    )
+    await show_main_menu(update, context)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("❌ Действие отменено.")
+    
+    # Проверяем, откуда пришёл запрос (из кнопки или текстом)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text("❌ Действие отменено.")
+        # Показываем главное меню
+        keyboard = await main_menu_keyboard()
+        await query.edit_message_text(
+            "📋 Главное меню:",
+            reply_markup=keyboard
+        )
+    else:
+        await update.message.reply_text("❌ Действие отменено.")
+        # Показываем главное меню
+        keyboard = await main_menu_keyboard()
+        await update.message.reply_text(
+            "📋 Главное меню:",
+            reply_markup=keyboard
+        )
+    return ConversationHandler.END
 
 # --- ДОБАВЛЕНИЕ ПРОДУКТА ---
 
@@ -120,23 +186,45 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(mt['name'], callback_data=f"meal_{mt['id']}")]
         for mt in meal_types
     ]
+    # Добавляем кнопку "Назад"
+    keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "🍽️ Выбери приём пищи:",
-        reply_markup=reply_markup
-    )
+    
+    # Если это ответ на кнопку "Добавить"
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(
+            "🍽️ Выбери приём пищи:",
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            "🍽️ Выбери приём пищи:",
+            reply_markup=reply_markup
+        )
     return SELECT_MEAL
 
 async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    if query.data == "menu_back":
+        # Возврат в главное меню
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+    
     meal_id = int(query.data.split('_')[1])
     context.user_data['meal_type_id'] = meal_id
     
+    # Добавляем кнопку "Назад"
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu_back")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await query.edit_message_text(
         "📷 Отправь фото штрих-кода или напиши название продукта.\n\n"
-        "Если продукт не найдётся, я предложу ввести КБЖУ вручную."
+        "Если продукт не найдётся, я предложу ввести КБЖУ вручную.",
+        reply_markup=reply_markup
     )
     return ENTER_PRODUCT
 
@@ -149,13 +237,18 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if product:
         print(f"✅ Найден в локальной БД: {product['name']}")
         context.user_data['product_id'] = product['id']
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
             f"🥩 {product['protein']}г | "
             f"🧈 {product['fat']}г | "
             f"🍞 {product['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?"
+            "Сколько граммов ты съел?",
+            reply_markup=reply_markup
         )
         return ENTER_WEIGHT
     
@@ -182,13 +275,18 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
         
         context.user_data['product_id'] = product['id']
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
             f"🥩 {product['protein']}г | "
             f"🧈 {product['fat']}г | "
             f"🍞 {product['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?"
+            "Сколько граммов ты съел?",
+            reply_markup=reply_markup
         )
         return ENTER_WEIGHT
     
@@ -296,12 +394,17 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # 4. Если и DeepSeek не нашёл — предлагаем ввести вручную
         print("❌ [5.2] ПРОДУКТ НЕ НАЙДЕН НИГДЕ")
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts, ни в DeepSeek.\n\n"
             "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
             "Либо введи КБЖУ на 100 г вручную через запятую:\n"
             "Пример: 45, 1.2, 0.3, 8.5\n"
-            "(Калории, Белки, Жиры, Углеводы)"
+            "(Калории, Белки, Жиры, Углеводы)",
+            reply_markup=reply_markup
         )
         context.user_data['product_name'] = product_name
         return MANUAL_ENTRY
@@ -314,6 +417,10 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if source == "deepseek":
         await update.message.reply_text("🤖 Данные от DeepSeek (примерные, могут отличаться):")
     
+    # Кнопка "Назад в меню"
+    back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+    back_markup = InlineKeyboardMarkup(back_button)
+    
     if len(products) == 1:
         # Если один продукт — сразу спрашиваем вес
         context.user_data['product_id'] = products[0]['id']
@@ -324,7 +431,8 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             f"🥩 {products[0]['protein']}г | "
             f"🧈 {products[0]['fat']}г | "
             f"🍞 {products[0]['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?"
+            "Сколько граммов ты съел?",
+            reply_markup=back_markup
         )
         return ENTER_WEIGHT
 
@@ -337,6 +445,7 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         keyboard.append([
             InlineKeyboardButton(btn_text, callback_data=callback_data)
         ])
+    keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         "🔍 Найдено несколько продуктов. Выбери нужный:",
@@ -351,6 +460,10 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     query = update.callback_query
     await query.answer()
+    
+    if query.data == "menu_back":
+        await show_main_menu(update, context)
+        return ConversationHandler.END
     
     # Получаем ID продукта из callback_data
     callback_data = query.data
@@ -371,13 +484,18 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if product:
         print(f"✅ [10] Продукт НАЙДЕН в локальной БД: {product['name']}")
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
             f"🥩 {product['protein']}г | "
             f"🧈 {product['fat']}г | "
             f"🍞 {product['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?"
+            "Сколько граммов ты съел?",
+            reply_markup=reply_markup
         )
         return ENTER_WEIGHT
     
@@ -416,13 +534,17 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data['product_id'] = product['id']
                 print(f"✅ [15.1] product_id обновлён в контексте: {product['id']}")
                 
+                keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await query.edit_message_text(
                     f"📦 {product['name']}\n"
                     f"🔥 {product['calories']} ккал | "
                     f"🥩 {product['protein']}г | "
                     f"🧈 {product['fat']}г | "
                     f"🍞 {product['carbs']}г на 100 г\n\n"
-                    "Сколько граммов ты съел?"
+                    "Сколько граммов ты съел?",
+                    reply_markup=reply_markup
                 )
                 return ENTER_WEIGHT
             except Exception as e:
@@ -461,10 +583,14 @@ async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data['product_id'] = product['id']
     
+    keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
         f"✅ Продукт {product_name} сохранён.\n"
         f"🔥 {calories} ккал | 🥩 {protein}г | 🧈 {fat}г | 🍞 {carbs}г на 100 г\n\n"
-        "Сколько граммов ты съел?"
+        "Сколько граммов ты съел?",
+        reply_markup=reply_markup
     )
     return ENTER_WEIGHT
 
@@ -529,6 +655,9 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
             format_nutrition(product['name'], weight, calories, protein, fat, carbs)
         )
         
+        # Показываем главное меню после сохранения
+        await show_main_menu(update, context)
+        
         context.user_data.clear()
         return ConversationHandler.END
     except Exception as e:
@@ -560,7 +689,16 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response += format_history(entries)
     response += f"\n\n🎯 Ваша норма (примерная): 1800 ккал | Осталось: {1800 - totals['total_calories']:.0f} ккал"
     
-    await update.message.reply_text(response)
+    # Если это ответ на кнопку, редактируем сообщение
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(response)
+    else:
+        await update.message.reply_text(response)
+    
+    # Показываем главное меню
+    await show_main_menu(update, context)
 
 async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -581,7 +719,14 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"У: {totals['total_carbs']:.1f}г\n"
         )
     
-    await update.message.reply_text(response)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(response)
+    else:
+        await update.message.reply_text(response)
+    
+    await show_main_menu(update, context)
 
 # --- ЭКСПОРТ CSV ---
 
@@ -602,6 +747,7 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not entries:
         await update.message.reply_text(f"📭 За {target_date.strftime('%d.%m.%Y')} записей нет.")
+        await show_main_menu(update, context)
         return
     
     output = io.StringIO()
@@ -626,6 +772,8 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         document=io.BytesIO(output.getvalue().encode('utf-8-sig')),
         filename=f"nutrition_{target_date.strftime('%Y-%m-%d')}.csv"
     )
+    
+    await show_main_menu(update, context)
 
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 
@@ -638,16 +786,27 @@ def main():
     
     app = Application.builder().token(BOT_TOKEN).build()
     
+    # Регистрация команд для меню Telegram
+    async def set_commands():
+        await app.bot.set_my_commands([
+            ("add", "➕ Добавить продукт"),
+            ("history", "📊 Сводка за сегодня"),
+            ("week", "📈 Статистика за 7 дней"),
+            ("export", "📁 Выгрузить CSV"),
+            ("cancel", "❌ Отменить действие"),
+        ])
+    loop.run_until_complete(set_commands())
+    
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('add', add_start)],
         states={
-            SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^meal_')],
+            SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^(meal_|menu_back)')],
             ENTER_PRODUCT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, enter_product),
                 MessageHandler(filters.PHOTO, enter_product)
             ],
             SELECT_PRODUCT_FROM_LIST: [
-                CallbackQueryHandler(select_product, pattern='^prod_')
+                CallbackQueryHandler(select_product, pattern='^(prod_|menu_back)')
             ],
             MANUAL_ENTRY: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry)
@@ -666,6 +825,9 @@ def main():
     app.add_handler(CommandHandler('week', week))
     app.add_handler(CommandHandler('export', export_csv))
     app.add_handler(CommandHandler('cancel', cancel))
+    
+    # Обработчики кнопок главного меню
+    app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
     
     print("🤖 Бот запущен!")
     app.run_polling()
