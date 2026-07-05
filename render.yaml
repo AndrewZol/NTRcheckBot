@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: nutricheckbot
+    runtime: python
+    buildCommand: |
+      apt-get update && apt-get install -y libzbar0
+      pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
