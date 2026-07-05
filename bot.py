@@ -708,14 +708,15 @@ def main():
         ],
         ENTER_WEIGHT: [
             CallbackQueryHandler(enter_weight, pattern='^menu_back$'),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_weight)
+            MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)  # <-- ТОЛЬКО ЦИФРЫ
         ]
     },
     fallbacks=[
         CommandHandler('cancel', cancel),
         CommandHandler('add', add_start)
     ],
-    per_message=False
+    per_message=False,
+    name="food_diary"
 )
     
     app.add_handler(conv_handler)
