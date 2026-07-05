@@ -220,12 +220,42 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # Получаем ID продукта из callback_data
     product_id = int(query.data.split('_')[1])
     context.user_data['product_id'] = product_id
     
+    # Пытаемся найти продукт в локальной БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
+    # Если продукта нет в локальной БД — ищем в сохранённых из API
+    if not product:
+        api_products = context.user_data.get('api_products', [])
+        print(f"🔍 Ищем в API-продуктах (ID: {product_id})")
+        for p in api_products:
+            if p['id'] == product_id:
+                # Сохраняем продукт в локальную БД
+                product = await db.add_product(
+                    name=p['name'],
+                    barcode=p['barcode'],
+                    calories=p['calories'],
+                    protein=p['protein'],
+                    fat=p['fat'],
+                    carbs=p['carbs'],
+                    is_custom=False
+                )
+                # Перезапрашиваем из БД, чтобы получить правильный id
+                product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
+                break
+    
+    # Если продукт всё ещё None — ошибка
+    if not product:
+        await query.edit_message_text(
+            "❌ Ошибка: продукт не найден. Попробуйте снова /add"
+        )
+        return ConversationHandler.END
+    
+    # Показываем продукт и запрашиваем вес
     await query.edit_message_text(
         f"📦 {product['name']}\n"
         f"🔥 {product['calories']} ккал | "
