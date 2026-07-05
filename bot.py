@@ -361,16 +361,39 @@ async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTER_WEIGHT
 
 async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("=" * 50)
+    print("⚖️ [17] ПОЛУЧЕН ВЕС")
+    print(f"⚖️ Текст: {update.message.text}")
+    print(f"⚖️ context.user_data: {context.user_data}")
+    
     try:
         weight = float(update.message.text.replace(',', '.'))
+        print(f"⚖️ Вес: {weight} г")
     except:
         await update.message.reply_text("❌ Введи число (граммы). Например: 150")
         return ENTER_WEIGHT
     
     # Получаем продукт
-    product_id = context.user_data['product_id']
+    product_id = context.user_data.get('product_id')
+    print(f"⚖️ product_id из контекста: {product_id}")
+    
+    if not product_id:
+        print("❌ ОШИБКА: product_id не найден в контексте!")
+        await update.message.reply_text(
+            "❌ Ошибка: продукт не найден. Попробуйте снова /add"
+        )
+        return ConversationHandler.END
+    
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
+        print(f"⚖️ Продукт из БД: {product}")
+    
+    if not product:
+        print("❌ ОШИБКА: продукт не найден в БД!")
+        await update.message.reply_text(
+            "❌ Ошибка: продукт не найден. Попробуйте снова /add"
+        )
+        return ConversationHandler.END
     
     # Пересчитываем КБЖУ на вес
     calories = (product['calories'] / 100) * weight
@@ -378,24 +401,35 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fat = (product['fat'] / 100) * weight
     carbs = (product['carbs'] / 100) * weight
     
+    print(f"⚖️ Пересчитано: {calories} ккал, {protein}г б, {fat}г ж, {carbs}г у")
+    
     # Сохраняем запись
-    await db.add_meal_entry(
-        user_id=update.effective_user.id,
-        product_id=product_id,
-        meal_type_id=context.user_data['meal_type_id'],
-        weight=weight,
-        calories=calories,
-        protein=protein,
-        fat=fat,
-        carbs=carbs
-    )
-    
-    await update.message.reply_text(
-        format_nutrition(product['name'], weight, calories, protein, fat, carbs)
-    )
-    
-    context.user_data.clear()
-    return ConversationHandler.END
+    try:
+        meal_type_id = context.user_data.get('meal_type_id')
+        print(f"⚖️ meal_type_id: {meal_type_id}")
+        
+        await db.add_meal_entry(
+            user_id=update.effective_user.id,
+            product_id=product_id,
+            meal_type_id=meal_type_id,
+            weight=weight,
+            calories=calories,
+            protein=protein,
+            fat=fat,
+            carbs=carbs
+        )
+        print("✅ [18] ЗАПИСЬ СОХРАНЕНА В БД!")
+        
+        await update.message.reply_text(
+            format_nutrition(product['name'], weight, calories, protein, fat, carbs)
+        )
+        
+        context.user_data.clear()
+        return ConversationHandler.END
+    except Exception as e:
+        print(f"❌ ОШИБКА при сохранении записи: {e}")
+        await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
+        return ConversationHandler.END
 
 # --- ИСТОРИЯ ---
 
