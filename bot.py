@@ -141,7 +141,7 @@ async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTER_PRODUCT
 
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     print(f"📩 Получено сообщение: {update.message.text}")
+    print(f"📩 Получено сообщение: {update.message.text}")
     # Если прислали фото
     if update.message.photo:
         # Здесь должна быть логика распознавания штрих-кода
