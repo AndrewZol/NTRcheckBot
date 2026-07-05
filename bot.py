@@ -10,16 +10,14 @@ from telegram.ext import (
 from config import BOT_TOKEN
 from database import Database
 
-# --- Состояния для ConversationHandler ---
+# --- Состояния ---
 (
     SELECT_MEAL, ENTER_PRODUCT, ENTER_WEIGHT, 
     MANUAL_ENTRY, SELECT_PRODUCT_FROM_LIST
 ) = range(5)
 
-# Инициализация БД
 db = Database()
 
-# Логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -90,7 +88,6 @@ def format_history(entries):
     return result
 
 async def main_menu_keyboard():
-    """Создаёт клавиатуру с главным меню."""
     keyboard = [
         [InlineKeyboardButton("➕ Добавить продукт", callback_data="menu_add")],
         [InlineKeyboardButton("📊 История за сегодня", callback_data="menu_history")],
@@ -101,9 +98,7 @@ async def main_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает главное меню с кнопками."""
     keyboard = await main_menu_keyboard()
-    
     if update.callback_query:
         query = update.callback_query
         await query.answer()
@@ -112,24 +107,21 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📋 Главное меню:", reply_markup=keyboard)
 
 async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает нажатия на кнопки главного меню."""
     query = update.callback_query
     await query.answer()
     
-    action = query.data
-    
-    if action == "menu_add":
+    if query.data == "menu_add":
         await add_start(update, context)
-    elif action == "menu_history":
+    elif query.data == "menu_history":
         await history(update, context)
-    elif action == "menu_week":
+    elif query.data == "menu_week":
         await week(update, context)
-    elif action == "menu_export":
+    elif query.data == "menu_export":
         await export_csv(update, context)
-    elif action == "menu_cancel":
+    elif query.data == "menu_cancel":
         await cancel(update, context)
 
-# --- ОБРАБОТЧИКИ КОМАНД ---
+# --- КОМАНДЫ ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -138,18 +130,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    
     if update.callback_query:
         query = update.callback_query
         await query.answer()
         await query.edit_message_text("❌ Действие отменено.")
-        keyboard = await main_menu_keyboard()
-        await query.edit_message_text("📋 Главное меню:", reply_markup=keyboard)
+        await show_main_menu(update, context)
     else:
         await update.message.reply_text("❌ Действие отменено.")
-        keyboard = await main_menu_keyboard()
-        await update.message.reply_text("📋 Главное меню:", reply_markup=keyboard)
+        await show_main_menu(update, context)
     return ConversationHandler.END
+
+# --- ДОБАВЛЕНИЕ ПРОДУКТА ---
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -181,7 +172,7 @@ async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     meal_id = int(query.data.split('_')[1])
     context.user_data['meal_type_id'] = meal_id
-    print(f"🍽️ [SELECT_MEAL] meal_type_id: {meal_id}")
+    print(f"🍽️ meal_type_id сохранён: {meal_id}")
     
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu_back")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -194,18 +185,16 @@ async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTER_PRODUCT
 
 async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
-    """Ищет продукт по штрих-коду (локально, затем в Open Food Facts)."""
-    print(f"🔍 [BARCODE] ПОИСК ПО ШТРИХ-КОДУ: {barcode}")
+    print(f"🔍 ПОИСК ПО ШТРИХ-КОДУ: {barcode}")
     
     product = await db.find_product_by_barcode(barcode)
     if product:
         print(f"✅ Найден в локальной БД: {product['name']}")
         context.user_data['product_id'] = product['id']
-        print(f"✅ [BARCODE] product_id сохранён: {product['id']}")
+        print(f"✅ product_id сохранён: {product['id']}")
         
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
         await update.message.reply_text(
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
@@ -217,7 +206,7 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
         return ENTER_WEIGHT
     
-    await update.message.reply_text("🌐 Ищу продукт в Open Food Facts...")
+    await update.message.reply_text("🌐 Ищу в Open Food Facts...")
     api_products = await db.search_product_by_barcode(barcode)
     
     if api_products:
@@ -237,11 +226,10 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
         
         context.user_data['product_id'] = product['id']
-        print(f"✅ [BARCODE] product_id сохранён: {product['id']}")
+        print(f"✅ product_id сохранён: {product['id']}")
         
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
         await update.message.reply_text(
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
@@ -253,32 +241,22 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
         return ENTER_WEIGHT
     
-    await update.message.reply_text(
-        f"❌ Продукт со штрих-кодом {barcode} не найден.\n"
-        "Попробуй ввести название продукта текстом."
-    )
+    await update.message.reply_text(f"❌ Продукт со штрих-кодом {barcode} не найден.")
     return ENTER_PRODUCT
 
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
-    print("📩 [1] ПОЛУЧЕНО СООБЩЕНИЕ")
+    print("📩 ПОЛУЧЕНО СООБЩЕНИЕ")
     
-    if update.callback_query:
+    if update.callback_query and update.callback_query.data == "menu_back":
         query = update.callback_query
         await query.answer()
-        if query.data == "menu_back":
-            context.user_data.clear()
-            await show_main_menu(update, context)
-            return ConversationHandler.END
+        context.user_data.clear()
+        await show_main_menu(update, context)
+        return ConversationHandler.END
     
     if update.message.photo:
         print("📩 Это ФОТО")
-    else:
-        print(f"📩 Текст: {update.message.text}")
-    print("=" * 50)
-    
-    if update.message.photo:
-        print("📷 [1.1] ОБРАБОТКА ФОТО")
         await update.message.reply_text("📷 Распознаю штрих-код...")
         
         try:
@@ -293,93 +271,74 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             decoded_objects = decode(image)
             
             if not decoded_objects:
-                await update.message.reply_text(
-                    "❌ Не удалось распознать штрих-код на фото.\n"
-                    "Попробуй сфотографировать чётче или введи название продукта текстом."
-                )
+                await update.message.reply_text("❌ Не удалось распознать штрих-код.")
                 return ENTER_PRODUCT
             
             barcode = decoded_objects[0].data.decode('utf-8')
             print(f"📷 Распознан штрих-код: {barcode}")
-            
             return await search_by_barcode(update, context, barcode)
-            
         except Exception as e:
-            print(f"❌ Ошибка при распознавании штрих-кода: {e}")
-            await update.message.reply_text(
-                "❌ Ошибка при обработке фото. Попробуй ввести название продукта текстом."
-            )
+            print(f"❌ Ошибка: {e}")
+            await update.message.reply_text("❌ Ошибка обработки фото.")
             return ENTER_PRODUCT
     
     product_name = update.message.text.strip()
-    context.user_data['search_query'] = product_name
+    print(f"📩 Текст: {product_name}")
 
-    print("🔍 [2] ПОИСК В ЛОКАЛЬНОЙ БАЗЕ")
+    # 1. Локальная БД
+    print("🔍 ПОИСК В ЛОКАЛЬНОЙ БАЗЕ")
     local_products = await db.find_products_by_name(product_name)
-    print(f"🔍 Найдено в локальной БД: {len(local_products)}")
-
+    print(f"🔍 Найдено: {len(local_products)}")
     if local_products:
-        print("✅ Использую локальные продукты")
-        await show_product_list(update, context, local_products, source="local")
+        await show_product_list(update, context, local_products, "local")
         return SELECT_PRODUCT_FROM_LIST
 
-    print("🌐 [3] ПОИСК В OPEN FOOD FACTS API")
-    await update.message.reply_text("🔍 Ищу в глобальной базе Open Food Facts...")
+    # 2. Open Food Facts
+    print("🌐 ПОИСК В OPEN FOOD FACTS")
+    await update.message.reply_text("🔍 Ищу в глобальной базе...")
     api_products = await db.search_product_by_name(product_name)
-    
-    print(f"🌐 Найдено в API: {len(api_products) if api_products else 0}")
+    print(f"🌐 Найдено: {len(api_products) if api_products else 0}")
     
     if api_products:
-        print("🌐 ID продуктов из API:")
-        for idx, p in enumerate(api_products):
-            print(f"   {idx+1}. ID: {p['id']}, Название: {p['name']}")
-        
         context.user_data['api_products'] = api_products
-        print("✅ [4] API-продукты сохранены")
-        
-        await show_product_list(update, context, api_products, source="api")
+        await show_product_list(update, context, api_products, "api")
         return SELECT_PRODUCT_FROM_LIST
-    
-    print("🤖 [5.1] ПРОБУЕМ НАЙТИ ЧЕРЕЗ DEEPSEEK")
-    await update.message.reply_text("🤖 Ищу в базе DeepSeek (примерные данные)...")
-    
+
+    # 3. DeepSeek
+    print("🤖 ПОИСК В DEEPSEEK")
+    await update.message.reply_text("🤖 Ищу в DeepSeek...")
     deepseek_products = await db.search_product_by_deepseek(product_name)
     
     if deepseek_products:
-        print(f"🤖 Найдено через DeepSeek: {len(deepseek_products)}")
         context.user_data['api_products'] = deepseek_products
-        await show_product_list(update, context, deepseek_products, source="deepseek")
+        await show_product_list(update, context, deepseek_products, "deepseek")
         return SELECT_PRODUCT_FROM_LIST
-    else:
-        print("❌ [5.2] ПРОДУКТ НЕ НАЙДЕН НИГДЕ")
-        
-        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "❌ Продукт не найден ни в локальной базе, ни в Open Food Facts, ни в DeepSeek.\n\n"
-            "📸 Ты можешь отправить фото штрих-кода, и я попробую найти продукт по нему.\n"
-            "Либо введи КБЖУ на 100 г вручную через запятую:\n"
-            "Пример: 45, 1.2, 0.3, 8.5\n"
-            "(Калории, Белки, Жиры, Углеводы)",
-            reply_markup=reply_markup
-        )
-        context.user_data['product_name'] = product_name
-        return MANUAL_ENTRY
+    
+    # 4. Ручной ввод
+    print("❌ ПРОДУКТ НЕ НАЙДЕН")
+    keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "❌ Продукт не найден.\n"
+        "Введи КБЖУ на 100 г через запятую:\n"
+        "Пример: 45, 1.2, 0.3, 8.5",
+        reply_markup=reply_markup
+    )
+    context.user_data['product_name'] = product_name
+    return MANUAL_ENTRY
 
-async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products, source="unknown"):
-    print(f"📋 [6] ПОКАЗ СПИСКА (источник: {source})")
-    print(f"📋 Количество: {len(products)}")
+async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products, source):
+    print(f"📋 ПОКАЗ СПИСКА ({source})")
     
     if source == "deepseek":
-        await update.message.reply_text("🤖 Данные от DeepSeek (примерные, могут отличаться):")
+        await update.message.reply_text("🤖 Данные от DeepSeek (примерные):")
     
     back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
     back_markup = InlineKeyboardMarkup(back_button)
     
     if len(products) == 1:
         context.user_data['product_id'] = products[0]['id']
-        print(f"📋 Выбран единственный продукт: ID={products[0]['id']}, {products[0]['name']}")
+        print(f"📋 Единственный продукт: ID={products[0]['id']}")
         await update.message.reply_text(
             f"📦 {products[0]['name']}\n"
             f"🔥 {products[0]['calories']} ккал | "
@@ -394,20 +353,15 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard = []
     for idx, product in enumerate(products):
         btn_text = f"{idx+1}. {product['name']} ({product['calories']} ккал/100г)"
-        callback_data = f"prod_{product['id']}"
-        print(f"📋 Кнопка {idx+1}: ID={product['id']}")
-        keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{product['id']}")])
     keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "🔍 Найдено несколько продуктов. Выбери нужный:",
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text("🔍 Выбери продукт:", reply_markup=reply_markup)
     return SELECT_PRODUCT_FROM_LIST
 
 async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
-    print("🎯 [8] ПОЛУЧЕН ВЫБОР ПРОДУКТА")
+    print("🎯 ВЫБОР ПРОДУКТА")
     
     query = update.callback_query
     await query.answer()
@@ -419,16 +373,17 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     product_id_str = query.data.split('_')[1]
     product_id = int(product_id_str)
-    print(f"🎯 Выбран product_id: {product_id}")
+    print(f"🎯 product_id: {product_id}")
     
-    context.user_data['product_id'] = product_id
-    print(f"🎯 product_id сохранён в context.user_data")
-    
+    # Сначала проверяем, есть ли продукт в локальной БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
     if product:
-        print(f"✅ [10] Продукт НАЙДЕН в локальной БД: {product['name']}")
+        print(f"✅ Найден в локальной БД: {product['name']}")
+        context.user_data['product_id'] = product['id']
+        print(f"✅ product_id сохранён: {product['id']}")
+        
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
@@ -442,18 +397,15 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ENTER_WEIGHT
     
-    print("⚠️ [10] Продукт НЕ НАЙДЕН в локальной БД")
-    
+    # Если нет — ищем в API-продуктах
     api_products = context.user_data.get('api_products', [])
-    print(f"🔍 [11] Ищем в API-продуктах, всего: {len(api_products)}")
+    print(f"🔍 Ищем в API-продуктах ({len(api_products)})")
     
-    found_in_api = False
     for p in api_products:
         if str(p['id']) == product_id_str:
-            found_in_api = True
-            print(f"✅ [12] Продукт НАЙДЕН в API: {p['name']}")
+            print(f"✅ Найден в API: {p['name']}")
             
-            print("💾 [13] СОХРАНЕНИЕ В ЛОКАЛЬНУЮ БД")
+            # Сохраняем в локальную БД
             try:
                 product = await db.add_product(
                     name=p['name'],
@@ -464,14 +416,13 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     carbs=p['carbs'],
                     is_custom=False
                 )
-                print(f"✅ [14] Продукт сохранён в локальную БД с ID: {product['id']}")
+                print(f"✅ Сохранён в БД с ID: {product['id']}")
                 
                 async with db.pool.acquire() as conn:
                     product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
-                print(f"✅ [15] Данные из БД: {product['name']}, {product['calories']} ккал")
                 
                 context.user_data['product_id'] = product['id']
-                print(f"✅ [15.1] product_id обновлён в контексте: {product['id']}")
+                print(f"✅ product_id обновлён: {product['id']}")
                 
                 keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -486,25 +437,21 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return ENTER_WEIGHT
             except Exception as e:
-                print(f"❌ ОШИБКА при сохранении в БД: {e}")
-                await query.edit_message_text(f"❌ Ошибка сохранения продукта: {e}")
+                print(f"❌ Ошибка сохранения: {e}")
+                await query.edit_message_text(f"❌ Ошибка: {e}")
                 return ConversationHandler.END
     
-    if not found_in_api:
-        print("❌ [16] Продукт НЕ НАЙДЕН ни в локальной БД, ни в API")
-        await query.edit_message_text(
-            "❌ Ошибка: продукт не найден. Попробуйте снова /add"
-        )
-        return ConversationHandler.END
+    print("❌ Продукт не найден")
+    await query.edit_message_text("❌ Ошибка: продукт не найден.")
+    return ConversationHandler.END
 
 async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query:
+    if update.callback_query and update.callback_query.data == "menu_back":
         query = update.callback_query
         await query.answer()
-        if query.data == "menu_back":
-            context.user_data.clear()
-            await show_main_menu(update, context)
-            return ConversationHandler.END
+        context.user_data.clear()
+        await show_main_menu(update, context)
+        return ConversationHandler.END
     
     try:
         values = update.message.text.split(',')
@@ -526,13 +473,13 @@ async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_custom=True
     )
     context.user_data['product_id'] = product['id']
-    print(f"✅ [MANUAL] product_id сохранён: {product['id']}")
+    print(f"✅ Ручной ввод: product_id={product['id']}")
     
     keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        f"✅ Продукт {product_name} сохранён.\n"
-        f"🔥 {calories} ккал | 🥩 {protein}г | 🧈 {fat}г | 🍞 {carbs}г на 100 г\n\n"
+        f"✅ Продукт сохранён.\n"
+        f"🔥 {calories} ккал | 🥩 {protein}г | 🧈 {fat}г | 🍞 {carbs}г\n\n"
         "Сколько граммов ты съел?",
         reply_markup=reply_markup
     )
@@ -540,8 +487,15 @@ async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
-    print("⚖️ [17] ПОЛУЧЕН ВЕС")
+    print("⚖️ ПОЛУЧЕН ВЕС")
     print(f"⚖️ Текст: {update.message.text}")
+    
+    if update.callback_query and update.callback_query.data == "menu_back":
+        query = update.callback_query
+        await query.answer()
+        context.user_data.clear()
+        await show_main_menu(update, context)
+        return ConversationHandler.END
     
     try:
         weight = float(update.message.text.replace(',', '.'))
@@ -553,32 +507,25 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     product_id = context.user_data.get('product_id')
     meal_type_id = context.user_data.get('meal_type_id')
     
-    print(f"⚖️ product_id из контекста: {product_id}")
-    print(f"⚖️ meal_type_id из контекста: {meal_type_id}")
+    print(f"⚖️ product_id: {product_id}")
+    print(f"⚖️ meal_type_id: {meal_type_id}")
     
     if not product_id:
-        print("❌ ОШИБКА: product_id не найден в контексте!")
-        await update.message.reply_text(
-            "❌ Ошибка: продукт не найден. Попробуйте снова /add"
-        )
+        print("❌ ОШИБКА: нет product_id")
+        await update.message.reply_text("❌ Ошибка: продукт не найден. Попробуйте /add")
         return ConversationHandler.END
     
     if not meal_type_id:
-        print("❌ ОШИБКА: meal_type_id не найден в контексте!")
-        await update.message.reply_text(
-            "❌ Ошибка: тип приёма пищи не найден. Попробуйте снова /add"
-        )
+        print("❌ ОШИБКА: нет meal_type_id")
+        await update.message.reply_text("❌ Ошибка: приём пищи не выбран. Попробуйте /add")
         return ConversationHandler.END
     
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
-        print(f"⚖️ Продукт из БД: {product}")
     
     if not product:
-        print("❌ ОШИБКА: продукт не найден в БД!")
-        await update.message.reply_text(
-            "❌ Ошибка: продукт не найден. Попробуйте снова /add"
-        )
+        print("❌ ОШИБКА: продукт не найден в БД")
+        await update.message.reply_text("❌ Ошибка: продукт не найден. Попробуйте /add")
         return ConversationHandler.END
     
     calories = (product['calories'] / 100) * weight
@@ -586,7 +533,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fat = (product['fat'] / 100) * weight
     carbs = (product['carbs'] / 100) * weight
     
-    print(f"⚖️ Пересчитано: {calories:.1f} ккал, {protein:.1f}г б, {fat:.1f}г ж, {carbs:.1f}г у")
+    print(f"⚖️ Пересчитано: {calories:.1f} ккал")
     
     try:
         await db.add_meal_entry(
@@ -599,17 +546,18 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fat=fat,
             carbs=carbs
         )
-        print("✅ [18] ЗАПИСЬ СОХРАНЕНА В БД!")
+        print("✅ ЗАПИСЬ СОХРАНЕНА!")
         
         await update.message.reply_text(
             format_nutrition(product['name'], weight, calories, protein, fat, carbs)
         )
         
-        await show_main_menu(update, context)
+        # ПОСЛЕ СОХРАНЕНИЯ — чистим и показываем меню
         context.user_data.clear()
+        await show_main_menu(update, context)
         return ConversationHandler.END
     except Exception as e:
-        print(f"❌ ОШИБКА при сохранении записи: {e}")
+        print(f"❌ ОШИБКА: {e}")
         await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
         return ConversationHandler.END
 
@@ -633,7 +581,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     response = f"📅 Сводка за {target_date.strftime('%d.%m.%Y')}\n\n"
     response += format_history(entries)
-    response += f"\n\n🎯 Ваша норма (примерная): 1800 ккал | Осталось: {1800 - totals['total_calories']:.0f} ккал"
+    response += f"\n\n🎯 Норма: 1800 ккал | Осталось: {1800 - totals['total_calories']:.0f} ккал"
     
     if update.callback_query:
         query = update.callback_query
@@ -641,7 +589,6 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(response)
     else:
         await update.message.reply_text(response)
-    
     await show_main_menu(update, context)
 
 async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -649,8 +596,7 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     end_date = (datetime.utcnow() + timedelta(hours=3)).date()
     start_date = end_date - timedelta(days=6)
     
-    response = f"📊 КБЖУ за последние 7 дней:\n\n"
-    
+    response = f"📊 КБЖУ за 7 дней:\n\n"
     for i in range(7):
         current_date = start_date + timedelta(days=i)
         totals = await db.get_daily_totals(user_id, current_date)
@@ -669,7 +615,6 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(response)
     else:
         await update.message.reply_text(response)
-    
     await show_main_menu(update, context)
 
 # --- ЭКСПОРТ CSV ---
@@ -688,7 +633,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_date = (datetime.utcnow() + timedelta(hours=3)).date()
     
     entries = await db.get_day_entries(user_id, target_date)
-    
     if not entries:
         await update.message.reply_text(f"📭 За {target_date.strftime('%d.%m.%Y')} записей нет.")
         await show_main_menu(update, context)
@@ -698,7 +642,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     writer = csv.writer(output, delimiter=';')
     writer.writerow(['Дата', 'Приём пищи', 'Продукт', 'Вес (г)', 
                      'Калории', 'Белки', 'Жиры', 'Углеводы'])
-    
     for entry in entries:
         writer.writerow([
             entry['date'].strftime('%Y-%m-%d'),
@@ -716,7 +659,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         document=io.BytesIO(output.getvalue().encode('utf-8-sig')),
         filename=f"nutrition_{target_date.strftime('%Y-%m-%d')}.csv"
     )
-    
     await show_main_menu(update, context)
 
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
@@ -780,17 +722,15 @@ def main():
     
     async def start_web_server():
         from aiohttp import web
-        
         async def health_check(request):
             return web.Response(text="OK")
-        
         app_web = web.Application()
         app_web.router.add_get('/', health_check)
         runner = web.AppRunner(app_web)
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', 10000)
         await site.start()
-        print("🌐 Веб-сервер для health check запущен на порту 10000")
+        print("🌐 Web server started on port 10000")
     
     loop.run_until_complete(start_web_server())
     app.run_polling()
