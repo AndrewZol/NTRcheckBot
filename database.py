@@ -179,3 +179,72 @@ class Database:
     async def get_meal_types(self):
         async with self.pool.acquire() as conn:
             return await conn.fetch('SELECT * FROM meal_types ORDER BY id')
+
+# Подключение библиотеки
+async def search_product_by_name(self, product_name: str):
+        """Ищет продукты по названию через Open Food Facts API."""
+        # Кодируем название для URL (заменяем пробелы на %20 и т.д.)
+        encoded_name = product_name.replace(" ", "%20")
+        # Используем эндпоинт для автоматического поиска
+        url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_name}&search_simple=1&action=process&json=1&page_size=5"
+        
+        headers = {
+            "User-Agent": "YourBotName/1.0 (ваш-email@example.com)"  # Замените на свои данные
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        products = data.get('products', [])
+                        # Преобразуем ответ API в единый формат, как у вашей БД
+                        formatted_products = []
+                        for p in products:
+                            # Извлекаем нужные нутриенты
+                            nutriments = p.get('nutriments', {})
+                            formatted_products.append({
+                                'id': p.get('_id', 0),
+                                'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
+                                'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
+                                'protein': nutriments.get('proteins_100g', 0),
+                                'fat': nutriments.get('fat_100g', 0),
+                                'carbs': nutriments.get('carbohydrates_100g', 0),
+                                'barcode': p.get('_id', ''), # ID продукта часто является штрих-кодом
+                            })
+                        return formatted_products
+                    else:
+                        return []
+        except Exception as e:
+            print(f"Ошибка при поиске в Open Food Facts: {e}")
+            return []
+
+    async def search_product_by_barcode(self, barcode: str):
+        """Ищет продукт по штрих-коду через Open Food Facts API."""
+        url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
+        
+        headers = {
+            "User-Agent": "YourBotName/1.0 (ваш-email@example.com)"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('status') == 1:  # Продукт найден
+                            p = data['product']
+                            nutriments = p.get('nutriments', {})
+                            return [{
+                                'id': p.get('_id', 0),
+                                'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
+                                'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
+                                'protein': nutriments.get('proteins_100g', 0),
+                                'fat': nutriments.get('fat_100g', 0),
+                                'carbs': nutriments.get('carbohydrates_100g', 0),
+                                'barcode': barcode,
+                            }]
+                    return []
+        except Exception as e:
+            print(f"Ошибка при поиске по штрих-коду: {e}")
+            return []
