@@ -307,6 +307,10 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
                 print(f"✅ [15] Данные из БД: {product['name']}, {product['calories']} ккал")
                 
+                # ВАЖНО: обновляем ID в контексте на правильный из БД!
+                context.user_data['product_id'] = product['id']
+                print(f"✅ [15.1] product_id обновлён в контексте: {product['id']}")
+                
                 await query.edit_message_text(
                     f"📦 {product['name']}\n"
                     f"🔥 {product['calories']} ккал | "
@@ -369,13 +373,16 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         weight = float(update.message.text.replace(',', '.'))
         print(f"⚖️ Вес: {weight} г")
-    except:
+    except ValueError:
         await update.message.reply_text("❌ Введи число (граммы). Например: 150")
         return ENTER_WEIGHT
     
-    # Получаем продукт
+    # Получаем продукт из контекста
     product_id = context.user_data.get('product_id')
+    meal_type_id = context.user_data.get('meal_type_id')
+    
     print(f"⚖️ product_id из контекста: {product_id}")
+    print(f"⚖️ meal_type_id из контекста: {meal_type_id}")
     
     if not product_id:
         print("❌ ОШИБКА: product_id не найден в контексте!")
@@ -384,6 +391,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     
+    # Получаем продукт из БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
         print(f"⚖️ Продукт из БД: {product}")
@@ -401,13 +409,10 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fat = (product['fat'] / 100) * weight
     carbs = (product['carbs'] / 100) * weight
     
-    print(f"⚖️ Пересчитано: {calories} ккал, {protein}г б, {fat}г ж, {carbs}г у")
+    print(f"⚖️ Пересчитано: {calories:.1f} ккал, {protein:.1f}г б, {fat:.1f}г ж, {carbs:.1f}г у")
     
     # Сохраняем запись
     try:
-        meal_type_id = context.user_data.get('meal_type_id')
-        print(f"⚖️ meal_type_id: {meal_type_id}")
-        
         await db.add_meal_entry(
             user_id=update.effective_user.id,
             product_id=product_id,
