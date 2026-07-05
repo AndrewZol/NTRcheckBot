@@ -410,7 +410,8 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, enter_weight)
             ]
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[CommandHandler('cancel', cancel),
+                  CommandHandler('add', add_start)]
     )
     
     app.add_handler(conv_handler)
