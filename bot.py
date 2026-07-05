@@ -296,8 +296,8 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     local_products = await db.find_products_by_name(product_name)
     print(f"🔍 Найдено: {len(local_products)}")
     if local_products:
-        await show_product_list(update, context, local_products, "local")
-        return SELECT_PRODUCT_FROM_LIST
+        result = await show_product_list(update, context, local_products, "local")
+        return result  # <-- ИСПРАВЛЕНО!
 
     # 2. Open Food Facts
     print("🌐 ПОИСК В OPEN FOOD FACTS")
@@ -307,8 +307,8 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if api_products:
         context.user_data['api_products'] = api_products
-        await show_product_list(update, context, api_products, "api")
-        return SELECT_PRODUCT_FROM_LIST
+        result = await show_product_list(update, context, api_products, "api")
+        return result  # <-- ИСПРАВЛЕНО!
 
     # 3. DeepSeek
     print("🤖 ПОИСК В DEEPSEEK")
@@ -317,8 +317,8 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if deepseek_products:
         context.user_data['api_products'] = deepseek_products
-        await show_product_list(update, context, deepseek_products, "deepseek")
-        return SELECT_PRODUCT_FROM_LIST
+        result = await show_product_list(update, context, deepseek_products, "deepseek")
+        return result  # <-- ИСПРАВЛЕНО!
     
     # 4. Ручной ввод
     print("❌ ПРОДУКТ НЕ НАЙДЕН")
