@@ -765,4 +765,130 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ЭКСПОРТ CSV ---
 
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update
+    user_id = update.effective_user.id
+    args = context.args
+    
+    if args and len(args) > 0:
+        try:
+            target_date = datetime.strptime(args[0], '%Y-%m-%d').date()
+        except:
+            await update.message.reply_text("❌ Неверный формат. Используй: /export YYYY-MM-DD")
+            return
+    else:
+        target_date = (datetime.utcnow() + timedelta(hours=3)).date()
+    
+    entries = await db.get_day_entries(user_id, target_date)
+    
+    if not entries:
+        await update.message.reply_text(f"📭 За {target_date.strftime('%d.%m.%Y')} записей нет.")
+        await show_main_menu(update, context)
+        return
+    
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';')
+    writer.writerow(['Дата', 'Приём пищи', 'Продукт', 'Вес (г)', 
+                     'Калории', 'Белки', 'Жиры', 'Углеводы'])
+    
+    for entry in entries:
+        writer.writerow([
+            entry['date'].strftime('%Y-%m-%d'),
+            entry['meal_type'],
+            entry['product_name'],
+            entry['weight_grams'],
+            round(entry['calories'], 1),
+            round(entry['protein'], 1),
+            round(entry['fat'], 1),
+            round(entry['carbs'], 1)
+        ])
+    
+    output.seek(0)
+    await update.message.reply_document(
+        document=io.BytesIO(output.getvalue().encode('utf-8-sig')),
+        filename=f"nutrition_{target_date.strftime('%Y-%m-%d')}.csv"
+    )
+    
+    await show_main_menu(update, context)
+
+# --- ГЛАВНАЯ ФУНКЦИЯ ---
+
+def main():
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(db.connect())
+    loop.run_until_complete(db.create_tables())
+    
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Регистрация команд для меню Telegram
+    async def set_commands():
+        await app.bot.set_my_commands([
+            ("add", "➕ Добавить продукт"),
+            ("history", "📊 Сводка за сегодня"),
+            ("week", "📈 Статистика за 7 дней"),
+            ("export", "📁 Выгрузить CSV"),
+            ("cancel", "❌ Отменить действие"),
+        ])
+    loop.run_until_complete(set_commands())
+    
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('add', add_start)],
+        states={
+            SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^(meal_|menu_back)')],
+            ENTER_PRODUCT: [
+                CallbackQueryHandler(enter_product, pattern='^menu_back$'),  # <-- Обработка "Назад"
+                MessageHandler(filters.TEXT & ~filters.COMMAND, enter_product),
+                MessageHandler(filters.PHOTO, enter_product)
+            ],
+            SELECT_PRODUCT_FROM_LIST: [
+                CallbackQueryHandler(select_product, pattern='^(prod_|menu_back)')
+            ],
+            MANUAL_ENTRY: [
+                CallbackQueryHandler(manual_entry, pattern='^menu_back$'),  # <-- Обработка "Назад"
+                MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry)
+            ],
+            ENTER_WEIGHT: [
+                CallbackQueryHandler(enter_weight, pattern='^menu_back$'),  # <-- Обработка "Назад"
+                MessageHandler(filters.TEXT & ~filters.COMMAND, enter_weight)
+            ]
+        },
+        fallbacks=[CommandHandler('cancel', cancel),
+                  CommandHandler('add', add_start)],
+        per_message=False  # <-- ВАЖНО!
+    )
+    
+    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('history', history))
+    app.add_handler(CommandHandler('week', week))
+    app.add_handler(CommandHandler('export', export_csv))
+    app.add_handler(CommandHandler('cancel', cancel))
+    
+    # Обработчики кнопок главного меню
+    app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
+    
+    print("🤖 Бот запущен!")
+    
+    # --- ЗАПУСКАЕМ ВЕБ-СЕРВЕР ДЛЯ HEALTH CHECK ---
+    async def start_web_server():
+        from aiohttp import web
+        
+        async def health_check(request):
+            return web.Response(text="OK")
+        
+        app_web = web.Application()
+        app_web.router.add_get('/', health_check)
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 10000)
+        await site.start()
+        print("🌐 Веб-сервер для health check запущен на порту 10000")
+    
+    # Запускаем веб-сервер
+    loop.run_until_complete(start_web_server())
+    
+    # Запускаем бота
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
