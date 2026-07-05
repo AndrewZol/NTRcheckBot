@@ -375,14 +375,16 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     product_id = int(product_id_str)
     print(f"🎯 product_id: {product_id}")
     
-    # Сначала проверяем, есть ли продукт в локальной БД
+    # Сохраняем ID в контекст
+    context.user_data['product_id'] = product_id
+    print(f"✅ product_id сохранён в context.user_data: {product_id}")
+    
+    # Проверяем, есть ли продукт в локальной БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
     if product:
         print(f"✅ Найден в локальной БД: {product['name']}")
-        context.user_data['product_id'] = product['id']
-        print(f"✅ product_id сохранён: {product['id']}")
         
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -395,11 +397,11 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Сколько граммов ты съел?",
             reply_markup=reply_markup
         )
-        return ENTER_WEIGHT
+        return ENTER_WEIGHT  # <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ
     
-    # Если нет — ищем в API-продуктах
+    # Если нет в локальной БД — ищем в API-продуктах
     api_products = context.user_data.get('api_products', [])
-    print(f"🔍 Ищем в API-продуктах ({len(api_products)})")
+    print(f"🔍 Ищем в API-продуктах ({len(api_products)} шт.)")
     
     for p in api_products:
         if str(p['id']) == product_id_str:
@@ -435,7 +437,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Сколько граммов ты съел?",
                     reply_markup=reply_markup
                 )
-                return ENTER_WEIGHT
+                return ENTER_WEIGHT  # <-- ГЛАВНОЕ ИСПРАВЛЕНИЕ
             except Exception as e:
                 print(f"❌ Ошибка сохранения: {e}")
                 await query.edit_message_text(f"❌ Ошибка: {e}")
