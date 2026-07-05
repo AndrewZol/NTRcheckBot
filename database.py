@@ -1,5 +1,6 @@
 import asyncpg
 import aiohttp
+import json
 from datetime import datetime, date
 from config import DATABASE_URL
 
@@ -214,9 +215,10 @@ class Database:
                         for p in products:
                             nutriments = p.get('nutriments', {})
                             product_id = p.get('_id', 0)
+                            name = p.get('product_name_ru') or p.get('product_name', 'Без названия')
                             formatted_products.append({
                                 'id': str(product_id),
-                                'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
+                                'name': name,
                                 'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
                                 'protein': nutriments.get('proteins_100g', 0),
                                 'fat': nutriments.get('fat_100g', 0),
@@ -251,9 +253,10 @@ class Database:
                             p = data['product']
                             nutriments = p.get('nutriments', {})
                             product_id = p.get('_id', 0)
+                            name = p.get('product_name_ru') or p.get('product_name', 'Без названия')
                             return [{
                                 'id': str(product_id),
-                                'name': p.get('product_name_ru', p.get('product_name', 'Без названия')),
+                                'name': name,
                                 'calories': nutriments.get('energy-kcal_100g', 0) or nutriments.get('energy_100g', 0),
                                 'protein': nutriments.get('proteins_100g', 0),
                                 'fat': nutriments.get('fat_100g', 0),
@@ -263,4 +266,77 @@ class Database:
                     return []
         except Exception as e:
             print(f"❌ Ошибка при поиске по штрих-коду: {e}")
+            return []
+
+    # =====================================================
+    # НОВЫЙ МЕТОД ДЛЯ РАБОТЫ С DEEPSEEK API (РЕЗЕРВНЫЙ)
+    # =====================================================
+
+    async def search_product_by_deepseek(self, product_name: str):
+        """Ищет КБЖУ продукта через DeepSeek API (резервный источник)."""
+        import os
+        
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            print("⚠️ DEEPSEEK_API_KEY не найден в переменных окружения")
+            return []
+        
+        url = "https://api.deepseek.com/v1/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        prompt = f"""Ты — помощник по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
+        
+Верни данные в строгом JSON формате (без лишнего текста, только JSON):
+[
+    {{
+        "id": "deepseek_1",
+        "name": "Название продукта на русском",
+        "calories": 100.0,
+        "protein": 5.0,
+        "fat": 3.0,
+        "carbs": 15.0,
+        "barcode": ""
+    }}
+]
+
+Если точных данных нет — дай примерные средние значения для этого типа продукта.
+Укажи вес на 100 г продукта.
+Не добавляй пояснений, только JSON массив."""
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "Ты — помощник по питанию. Отвечай только JSON массивами."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
+                        print(f"🤖 DeepSeek ответ: {content[:200]}...")
+                        
+                        try:
+                            result = json.loads(content)
+                            if isinstance(result, list):
+                                return result
+                            else:
+                                return [result]
+                        except json.JSONDecodeError:
+                            print(f"❌ Не удалось распарсить JSON из DeepSeek: {content}")
+                            return []
+                    else:
+                        print(f"❌ DeepSeek API ошибка: {response.status}")
+                        return []
+        except Exception as e:
+            print(f"❌ Ошибка при запросе к DeepSeek: {e}")
             return []
