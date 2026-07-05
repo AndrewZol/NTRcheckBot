@@ -195,7 +195,7 @@ class Database:
         """Ищет продукты по названию через Open Food Facts API."""
         from urllib.parse import quote
         encoded_name = quote(product_name)
-        url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_name}&search_simple=1&action=process&json=1&page_size=5&lc=ru"
+        url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_name}*&search_simple=1&action=process&json=1&page_size=5&lc=ru"
         
         print(f"🔍 Запрос к API: {url}")
         
