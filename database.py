@@ -346,69 +346,76 @@ class Database:
     # =====================================================
 
     async def search_product_by_deepseek(self, product_name: str):
-        """Ищет КБЖУ продукта через DeepSeek API (резервный источник)."""
-        import os
-        
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            print("⚠️ DEEPSEEK_API_KEY не найден")
-            return []
-        
-        url = "https://api.deepseek.com/v1/chat/completions"
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        prompt = f"""Ты — помощник по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
+    """Ищет КБЖУ продукта через DeepSeek API (основной источник)."""
+    import os
+    
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        print("⚠️ DEEPSEEK_API_KEY не найден")
+        return []
+    
+    url = "https://api.deepseek.com/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    prompt = f"""Ты — эксперт по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
 
-Верни ответ в строгом JSON формате:
+Верни **точные средние значения** на 100 г продукта в строгом JSON формате. НЕ используй диапазоны (например, "100-120"). Дай конкретные числа.
+
+Если точных данных нет — дай **усреднённые значения** на основе типичных продуктов этой категории.
+
+Пример ответа:
 [
     {{
         "id": "deepseek_1",
-        "name": "Название продукта на русском",
-        "calories": 100.0,
-        "protein": 5.0,
-        "fat": 3.0,
-        "carbs": 15.0,
+        "name": "Куриная грудка варёная",
+        "calories": 165,
+        "protein": 31,
+        "fat": 3.6,
+        "carbs": 0,
         "barcode": ""
     }}
 ]
 
-Если точных данных нет — дай примерные значения.
-Не добавляй пояснений, только JSON массив."""
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "Ты — помощник по питанию. Отвечай только JSON массивами."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 500
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
-                        print(f"🤖 DeepSeek ответ: {content[:200]}...")
-                        
-                        try:
-                            result = json.loads(content)
-                            if isinstance(result, list):
-                                return result
-                            else:
-                                return [result]
-                        except json.JSONDecodeError:
-                            print(f"❌ Не удалось распарсить JSON из DeepSeek")
-                            return []
-                    else:
-                        print(f"❌ DeepSeek API ошибка: {response.status}")
+Важно:
+- calories, protein, fat, carbs — это числа (не строки).
+- Не используй диапазоны.
+- Не добавляй пояснений вне JSON.
+- Если продукт имеет несколько вариантов (жареный/варёный) — выбери самый распространённый."""
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "Ты — эксперт по питанию. Отвечай только JSON массивами с конкретными числами. Никаких диапазонов."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,  # <-- НИЗКАЯ ТЕМПЕРАТУРА ДЛЯ ТОЧНОСТИ
+        "max_tokens": 500
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
+                    print(f"🤖 DeepSeek ответ: {content[:200]}...")
+                    
+                    try:
+                        result = json.loads(content)
+                        if isinstance(result, list):
+                            return result
+                        else:
+                            return [result]
+                    except json.JSONDecodeError:
+                        print(f"❌ Не удалось распарсить JSON из DeepSeek: {content}")
                         return []
-        except Exception as e:
-            print(f"❌ Ошибка при запросе к DeepSeek: {e}")
-            return []
+                else:
+                    print(f"❌ DeepSeek API ошибка: {response.status}")
+                    return []
+    except Exception as e:
+        print(f"❌ Ошибка при запросе к DeepSeek: {e}")
+        return []
