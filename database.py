@@ -18,6 +18,7 @@ class Database:
 
     async def create_tables(self):
         async with self.pool.acquire() as conn:
+            # Таблица пользователей
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
@@ -26,6 +27,7 @@ class Database:
                 )
             ''')
             
+            # Таблица продуктов (id - BIGSERIAL)
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS products (
                     id BIGSERIAL PRIMARY KEY,
@@ -39,6 +41,7 @@ class Database:
                 )
             ''')
             
+            # Типы приёмов пищи
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS meal_types (
                     id SERIAL PRIMARY KEY,
@@ -46,6 +49,7 @@ class Database:
                 )
             ''')
             
+            # Добавляем типы приёмов, если их нет
             await conn.execute('''
                 INSERT INTO meal_types (name) VALUES 
                     ('Завтрак'), ('Второй завтрак'), ('Обед'), 
@@ -53,6 +57,7 @@ class Database:
                 ON CONFLICT (name) DO NOTHING
             ''')
             
+            # Таблица записей о приёмах пищи (product_id - BIGINT)
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS meal_entries (
                     id SERIAL PRIMARY KEY,
@@ -69,6 +74,7 @@ class Database:
                 )
             ''')
 
+    # Регистрация пользователя
     async def register_user(self, user_id: int, username: str):
         async with self.pool.acquire() as conn:
             await conn.execute('''
@@ -77,12 +83,14 @@ class Database:
                 ON CONFLICT (user_id) DO NOTHING
             ''', user_id, username)
 
+    # Поиск продукта по штрих-коду (локальная БД)
     async def find_product_by_barcode(self, barcode: str):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow(
                 'SELECT * FROM products WHERE barcode = $1', barcode
             )
 
+    # Поиск продукта по названию (локальная БД)
     async def find_products_by_name(self, name: str):
         async with self.pool.acquire() as conn:
             return await conn.fetch(
@@ -90,6 +98,7 @@ class Database:
                 f'%{name}%'
             )
 
+    # Добавление нового продукта
     async def add_product(self, name: str, barcode: str = None, 
                            calories: float = 0, protein: float = 0, 
                            fat: float = 0, carbs: float = 0, 
@@ -107,26 +116,17 @@ class Database:
                 RETURNING id
             ''', barcode, name, calories, protein, fat, carbs, is_custom)
 
+    # Сохранение приёма пищи (с московским временем)
     async def add_meal_entry(self, user_id: int, product_id: int, 
                              meal_type_id: int, weight: float,
                              calories: float, protein: float, 
                              fat: float, carbs: float):
-        """Сохраняет запись о приёме пищи с московским временем."""
-        print("=" * 50)
-        print("💾 [DB] СОХРАНЕНИЕ ЗАПИСИ")
-        print(f"💾 user_id: {user_id}")
-        print(f"💾 product_id: {product_id}")
-        print(f"💾 meal_type_id: {meal_type_id}")
-        print(f"💾 weight: {weight}")
-        print(f"💾 calories: {calories}")
-        print(f"💾 protein: {protein}")
-        print(f"💾 fat: {fat}")
-        print(f"💾 carbs: {carbs}")
+        print("💾 СОХРАНЕНИЕ В БД")
+        print(f"💾 user_id={user_id}, product_id={product_id}, meal_type_id={meal_type_id}")
         
         # Московское время (UTC+3)
         moscow_time = datetime.utcnow() + timedelta(hours=3)
         moscow_date = moscow_time.date()
-        print(f"💾 Московская дата: {moscow_date}")
         
         try:
             async with self.pool.acquire() as conn:
@@ -137,12 +137,13 @@ class Database:
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ''', user_id, product_id, meal_type_id, moscow_date, weight, 
                      calories, protein, fat, carbs)
-                print(f"✅ [DB] Запись успешно сохранена! Result: {result}")
+                print(f"✅ БД: запись сохранена! {result}")
                 return result
         except Exception as e:
-            print(f"❌ [DB] ОШИБКА сохранения: {e}")
-            raise  # Пробрасываем ошибку дальше, чтобы бот мог её обработать
+            print(f"❌ БД: ошибка сохранения: {e}")
+            raise
 
+    # Получение сводки за день
     async def get_daily_summary(self, user_id: int, target_date):
         async with self.pool.acquire() as conn:
             return await conn.fetch('''
@@ -161,6 +162,7 @@ class Database:
                 ORDER BY mt.id, me.created_at
             ''', user_id, target_date)
 
+    # Получение суммарного КБЖУ за день
     async def get_daily_totals(self, user_id: int, target_date):
         async with self.pool.acquire() as conn:
             return await conn.fetchrow('''
@@ -173,6 +175,7 @@ class Database:
                 WHERE user_id = $1 AND date = $2
             ''', user_id, target_date)
 
+    # Получение всех записей за день для CSV
     async def get_day_entries(self, user_id: int, target_date):
         async with self.pool.acquire() as conn:
             return await conn.fetch('''
@@ -192,12 +195,13 @@ class Database:
                 ORDER BY mt.id, me.created_at
             ''', user_id, target_date)
 
+    # Получение типов приёмов пищи
     async def get_meal_types(self):
         async with self.pool.acquire() as conn:
             return await conn.fetch('SELECT * FROM meal_types ORDER BY id')
 
     # =====================================================
-    # ПОИСК В OPEN FOOD FACTS
+    # ПОИСК В OPEN FOOD FACTS (ВРЕМЕННО ОТКЛЮЧЁН)
     # =====================================================
 
     async def search_product_by_name(self, product_name: str):
@@ -205,18 +209,14 @@ class Database:
         from urllib.parse import quote
         
         words = product_name.split()
-        
-        # Пробуем несколько вариантов поиска
         search_queries = [
             f"{product_name}*",
             f"{product_name}",
         ]
-        
         if len(words) > 1:
             search_queries.append(f"{words[0]} {words[-1]}*")
             search_queries.append(f"{words[0]}*")
         
-        # Английские переводы
         eng_translations = {
             "курица": "chicken",
             "грудка": "breast",
@@ -245,7 +245,6 @@ class Database:
             else:
                 search_queries.append(f"{eng_word}*")
         
-        # Удаляем дубликаты
         search_queries = list(dict.fromkeys(search_queries))
         
         headers = {
@@ -342,26 +341,26 @@ class Database:
             return []
 
     # =====================================================
-    # ПОИСК В DEEPSEEK
+    # ПОИСК В DEEPSEEK (ОСНОВНОЙ ИСТОЧНИК)
     # =====================================================
 
     async def search_product_by_deepseek(self, product_name: str):
-    """Ищет КБЖУ продукта через DeepSeek API (основной источник)."""
-    import os
-    
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        print("⚠️ DEEPSEEK_API_KEY не найден")
-        return []
-    
-    url = "https://api.deepseek.com/v1/chat/completions"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    prompt = f"""Ты — эксперт по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
+        """Ищет КБЖУ продукта через DeepSeek API (основной источник)."""
+        import os
+        
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            print("⚠️ DEEPSEEK_API_KEY не найден")
+            return []
+        
+        url = "https://api.deepseek.com/v1/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        prompt = f"""Ты — эксперт по питанию. Пользователь ищет КБЖУ продукта: "{product_name}".
 
 Верни **точные средние значения** на 100 г продукта в строгом JSON формате. НЕ используй диапазоны (например, "100-120"). Дай конкретные числа.
 
@@ -385,37 +384,37 @@ class Database:
 - Не используй диапазоны.
 - Не добавляй пояснений вне JSON.
 - Если продукт имеет несколько вариантов (жареный/варёный) — выбери самый распространённый."""
-    
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "Ты — эксперт по питанию. Отвечай только JSON массивами с конкретными числами. Никаких диапазонов."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.1,  # <-- НИЗКАЯ ТЕМПЕРАТУРА ДЛЯ ТОЧНОСТИ
-        "max_tokens": 500
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
-                    print(f"🤖 DeepSeek ответ: {content[:200]}...")
-                    
-                    try:
-                        result = json.loads(content)
-                        if isinstance(result, list):
-                            return result
-                        else:
-                            return [result]
-                    except json.JSONDecodeError:
-                        print(f"❌ Не удалось распарсить JSON из DeepSeek: {content}")
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "Ты — эксперт по питанию. Отвечай только JSON массивами с конкретными числами. Никаких диапазонов."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 500
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        content = data.get('choices', [{}])[0].get('message', {}).get('content', '[]')
+                        print(f"🤖 DeepSeek ответ: {content[:200]}...")
+                        
+                        try:
+                            result = json.loads(content)
+                            if isinstance(result, list):
+                                return result
+                            else:
+                                return [result]
+                        except json.JSONDecodeError:
+                            print(f"❌ Не удалось распарсить JSON из DeepSeek: {content}")
+                            return []
+                    else:
+                        print(f"❌ DeepSeek API ошибка: {response.status}")
                         return []
-                else:
-                    print(f"❌ DeepSeek API ошибка: {response.status}")
-                    return []
-    except Exception as e:
-        print(f"❌ Ошибка при запросе к DeepSeek: {e}")
-        return []
+        except Exception as e:
+            print(f"❌ Ошибка при запросе к DeepSeek: {e}")
+            return []
