@@ -165,15 +165,23 @@ async def search_vkusvill_by_barcode(barcode: str):
             "id": 1
         }
         
+        print(f"📤 Отправка запроса к ВкусВилл: {search_url}")
+        print(f"📤 Payload: {payload}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(search_url, json=payload, headers={"Content-Type": "application/json"}) as response:
+                print(f"📥 Статус ответа ВкусВилл: {response.status}")
+                
                 if response.status == 200:
                     data = await response.json()
+                    print(f"📥 Ответ ВкусВилл: {data}")
                     products = data.get('result', [])
                     
                     if products and len(products) > 0:
+                        print(f"📦 Найдено продуктов: {len(products)}")
                         product = products[0]
                         product_id = product.get('id')
+                        print(f"📦 product_id: {product_id}")
                         
                         if product_id:
                             detail_payload = {
@@ -183,12 +191,19 @@ async def search_vkusvill_by_barcode(barcode: str):
                                 "id": 2
                             }
                             
+                            print(f"📤 Запрос деталей: {detail_payload}")
+                            
                             async with session.post(search_url, json=detail_payload, headers={"Content-Type": "application/json"}) as detail_response:
+                                print(f"📥 Статус деталей: {detail_response.status}")
+                                
                                 if detail_response.status == 200:
                                     detail_data = await detail_response.json()
+                                    print(f"📥 Детали: {detail_data}")
                                     product_detail = detail_data.get('result', {})
                                     
                                     attributes = product_detail.get('attributes', {})
+                                    print(f"📥 Атрибуты: {attributes}")
+                                    
                                     nutriments = {
                                         'calories': attributes.get('calories') or attributes.get('energy_value') or 0,
                                         'protein': attributes.get('protein') or 0,
@@ -206,10 +221,19 @@ async def search_vkusvill_by_barcode(barcode: str):
                                         'barcode': barcode,
                                         'source': 'vkusvill'
                                     }]
+                                else:
+                                    print(f"❌ Ошибка при получении деталей: {detail_response.status}")
+                    else:
+                        print(f"❌ Продукты не найдены")
+                        return []
+                else:
+                    print(f"❌ Ошибка HTTP ВкусВилл: {response.status}")
+                    return []
     except Exception as e:
         print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
-    
-    return []
+        import traceback
+        traceback.print_exc()
+        return []
 
 async def search_vkusvill_by_name(product_name: str):
     """Ищет продукты по названию через MCP-сервер ВкусВилл."""
