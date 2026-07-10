@@ -275,6 +275,9 @@ async def search_vkusvill_by_name(product_name: str):
 async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
     print(f"🔍 ПОИСК ПО ШТРИХ-КОДУ: {barcode}")
     
+    # <-- ИСПРАВЛЕНО: Сохраняем штрих-код для повторного поиска после удаления
+    context.user_data['current_barcode'] = barcode
+    
     # 1. Ищем в локальной базе
     product = await db.find_product_by_barcode(barcode)
     if product:
@@ -592,22 +595,32 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ENTER_WEIGHT
     
-    # Обработка кнопки "Удалить"
+    # <-- ИСПРАВЛЕНО: Удаление с повторным поиском по штрих-коду
     if query.data.startswith("delete_"):
         product_id = int(query.data.split('_')[1])
         print(f"🗑️ Удаление продукта ID={product_id}")
         
-        # Удаляем продукт из локальной БД
         try:
             async with db.pool.acquire() as conn:
                 await conn.execute('DELETE FROM products WHERE id = $1', product_id)
             print(f"✅ Продукт удалён из БД")
-            await query.edit_message_text(
-                f"🗑️ Продукт удалён из вашей базы.\n"
-                "Начни поиск заново через /add"
-            )
-            # Показываем главное меню
-            await show_main_menu(update, context)
+            
+            barcode = context.user_data.get('current_barcode')
+            
+            if barcode:
+                await query.edit_message_text(
+                    f"🗑️ Продукт удалён из вашей базы.\n"
+                    "🔍 Ищем заново по штрих-коду..."
+                )
+                context.user_data.clear()
+                return await search_by_barcode(update, context, barcode)
+            else:
+                await query.edit_message_text(
+                    f"🗑️ Продукт удалён из вашей базы.\n"
+                    "Начни поиск заново через /add"
+                )
+                context.user_data.clear()
+                await show_main_menu(update, context)
         except Exception as e:
             print(f"❌ Ошибка удаления: {e}")
             await query.edit_message_text(f"❌ Ошибка удаления: {e}")
@@ -939,7 +952,7 @@ def main():
             MessageHandler(filters.PHOTO, enter_product)
         ],
         SELECT_PRODUCT_FROM_LIST: [
-            CallbackQueryHandler(select_product, pattern='^(prod_|menu_back|weight_|delete_)')  # <-- ИЗМЕНЕНО!
+            CallbackQueryHandler(select_product, pattern='^(prod_|menu_back|weight_|delete_)')
         ],
         MANUAL_ENTRY: [
             CallbackQueryHandler(manual_entry, pattern='^menu_back$'),
