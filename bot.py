@@ -1,6 +1,8 @@
 import logging
 import csv
 import io
+import aiohttp
+import json
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -146,58 +148,141 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context)
     return ConversationHandler.END
 
-# --- ДОБАВЛЕНИЕ ПРОДУКТА ---
+# --- ПОИСК В ВКУСВИЛЛ ---
 
-async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+async def search_vkusvill_by_barcode(barcode: str):
+    """Ищет продукт по штрих-коду через MCP-сервер ВкусВилл."""
+    print(f"🔍 ПОИСК В ВКУСВИЛЛ ПО ШТРИХ-КОДУ: {barcode}")
     
-    meal_types = await db.get_meal_types()
-    keyboard = [
-        [InlineKeyboardButton(mt['name'], callback_data=f"meal_{mt['id']}")]
-        for mt in meal_types
-    ]
-    keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    try:
+        search_url = "https://mcp001.vkusvill.ru/mcp"
+        
+        # Поиск по штрих-коду
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "vkusvill_products_search",
+            "params": [barcode],
+            "id": 1
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(search_url, json=payload, headers={"Content-Type": "application/json"}) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    products = data.get('result', [])
+                    
+                    if products and len(products) > 0:
+                        product = products[0]
+                        product_id = product.get('id')
+                        
+                        if product_id:
+                            # Получаем детальную информацию
+                            detail_payload = {
+                                "jsonrpc": "2.0",
+                                "method": "vkusvill_product_details",
+                                "params": [product_id],
+                                "id": 2
+                            }
+                            
+                            async with session.post(search_url, json=detail_payload, headers={"Content-Type": "application/json"}) as detail_response:
+                                if detail_response.status == 200:
+                                    detail_data = await detail_response.json()
+                                    product_detail = detail_data.get('result', {})
+                                    
+                                    attributes = product_detail.get('attributes', {})
+                                    nutriments = {
+                                        'calories': attributes.get('calories') or attributes.get('energy_value') or 0,
+                                        'protein': attributes.get('protein') or 0,
+                                        'fat': attributes.get('fat') or 0,
+                                        'carbs': attributes.get('carbohydrates') or 0
+                                    }
+                                    
+                                    return [{
+                                        'id': str(product_id),
+                                        'name': product_detail.get('name', 'Без названия'),
+                                        'calories': float(nutriments['calories']),
+                                        'protein': float(nutriments['protein']),
+                                        'fat': float(nutriments['fat']),
+                                        'carbs': float(nutriments['carbs']),
+                                        'barcode': barcode,
+                                        'source': 'vkusvill'
+                                    }]
+    except Exception as e:
+        print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
     
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("🍽️ Выбери приём пищи:", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text("🍽️ Выбери приём пищи:", reply_markup=reply_markup)
-    return SELECT_MEAL
+    return []
 
-async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+async def search_vkusvill_by_name(product_name: str):
+    """Ищет продукты по названию через MCP-сервер ВкусВилл."""
+    print(f"🔍 ПОИСК В ВКУСВИЛЛ ПО НАЗВАНИЮ: {product_name}")
     
-    if query.data == "menu_back":
-        context.user_data.clear()
-        await show_main_menu(update, context)
-        return ConversationHandler.END
+    try:
+        search_url = "https://mcp001.vkusvill.ru/mcp"
+        
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "vkusvill_products_search",
+            "params": [product_name],
+            "id": 1
+        }
+        
+        results = []
+        async with aiohttp.ClientSession() as session:
+            async with session.post(search_url, json=payload, headers={"Content-Type": "application/json"}) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    products = data.get('result', [])
+                    
+                    if products and len(products) > 0:
+                        for idx, product in enumerate(products[:5]):
+                            product_id = product.get('id')
+                            if product_id:
+                                detail_payload = {
+                                    "jsonrpc": "2.0",
+                                    "method": "vkusvill_product_details",
+                                    "params": [product_id],
+                                    "id": idx + 2
+                                }
+                                
+                                async with session.post(search_url, json=detail_payload, headers={"Content-Type": "application/json"}) as detail_response:
+                                    if detail_response.status == 200:
+                                        detail_data = await detail_response.json()
+                                        product_detail = detail_data.get('result', {})
+                                        
+                                        attributes = product_detail.get('attributes', {})
+                                        nutriments = {
+                                            'calories': attributes.get('calories') or attributes.get('energy_value') or 0,
+                                            'protein': attributes.get('protein') or 0,
+                                            'fat': attributes.get('fat') or 0,
+                                            'carbs': attributes.get('carbohydrates') or 0
+                                        }
+                                        
+                                        results.append({
+                                            'id': str(product_id),
+                                            'name': product_detail.get('name', product.get('name', 'Без названия')),
+                                            'calories': float(nutriments['calories']),
+                                            'protein': float(nutriments['protein']),
+                                            'fat': float(nutriments['fat']),
+                                            'carbs': float(nutriments['carbs']),
+                                            'barcode': '',
+                                            'source': 'vkusvill'
+                                        })
+    except Exception as e:
+        print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
     
-    meal_id = int(query.data.split('_')[1])
-    context.user_data['meal_type_id'] = meal_id
-    print(f"🍽️ meal_type_id сохранён: {meal_id}")
-    
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu_back")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        "📷 Отправь фото штрих-кода или напиши название продукта.\n\n"
-        "Если продукт не найдётся, я предложу ввести КБЖУ вручную.",
-        reply_markup=reply_markup
-    )
-    return ENTER_PRODUCT
+    return results
+
+# --- ПОИСК ПО ШТРИХ-КОДУ ---
 
 async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
+    """Ищет продукт по штрих-коду: локально → ВкусВилл → DeepSeek"""
     print(f"🔍 ПОИСК ПО ШТРИХ-КОДУ: {barcode}")
     
+    # 1. Ищем в локальной базе
     product = await db.find_product_by_barcode(barcode)
     if product:
         print(f"✅ Найден в локальной БД: {product['name']}")
         context.user_data['product_id'] = product['id']
-        print(f"✅ product_id сохранён: {product['id']}")
         
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -212,12 +297,13 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
         return ENTER_WEIGHT
     
-    await update.message.reply_text("🌐 Ищу в Open Food Facts...")
-    api_products = await db.search_product_by_barcode(barcode)
+    # 2. Ищем во ВкусВилл
+    await update.message.reply_text("🛒 Ищу во ВкусВилл...")
+    vkusvill_products = await search_vkusvill_by_barcode(barcode)
     
-    if api_products:
-        product_data = api_products[0]
-        print(f"✅ Найден в Open Food Facts: {product_data['name']}")
+    if vkusvill_products:
+        product_data = vkusvill_products[0]
+        print(f"✅ Найден во ВкусВилл: {product_data['name']}")
         
         product = await db.add_product(
             name=product_data['name'],
@@ -232,7 +318,6 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
         
         context.user_data['product_id'] = product['id']
-        print(f"✅ product_id сохранён: {product['id']}")
         
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -247,8 +332,49 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
         return ENTER_WEIGHT
     
-    await update.message.reply_text(f"❌ Продукт со штрих-кодом {barcode} не найден.")
+    # 3. Ищем через DeepSeek
+    await update.message.reply_text("🤖 Ищу через DeepSeek...")
+    deepseek_products = await db.search_product_by_deepseek(f"штрих-код {barcode} продукт")
+    
+    if deepseek_products:
+        product_data = deepseek_products[0]
+        print(f"✅ Найден через DeepSeek: {product_data['name']}")
+        
+        product = await db.add_product(
+            name=product_data['name'],
+            barcode=barcode,
+            calories=product_data['calories'],
+            protein=product_data['protein'],
+            fat=product_data['fat'],
+            carbs=product_data['carbs'],
+            is_custom=False
+        )
+        async with db.pool.acquire() as conn:
+            product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product['id'])
+        
+        context.user_data['product_id'] = product['id']
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"📦 {product['name']}\n"
+            f"🔥 {product['calories']} ккал | "
+            f"🥩 {product['protein']}г | "
+            f"🧈 {product['fat']}г | "
+            f"🍞 {product['carbs']}г на 100 г\n\n"
+            "Сколько граммов ты съел?",
+            reply_markup=reply_markup
+        )
+        return ENTER_WEIGHT
+    
+    # 4. Не найдено
+    await update.message.reply_text(
+        f"❌ Продукт со штрих-кодом {barcode} не найден.\n"
+        "Попробуй ввести название продукта текстом."
+    )
     return ENTER_PRODUCT
+
+# --- ОСНОВНОЙ ПОИСК ПО ТЕКСТУ ---
 
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
@@ -297,35 +423,35 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"🔍 Найдено: {len(local_products)}")
     if local_products:
         result = await show_product_list(update, context, local_products, "local")
-        return result  # <-- ИСПРАВЛЕНО!
+        return result
 
-    # 2. Open Food Facts
-    print("🌐 ПОИСК В OPEN FOOD FACTS")
-    await update.message.reply_text("🔍 Ищу в глобальной базе...")
-    api_products = await db.search_product_by_name(product_name)
-    print(f"🌐 Найдено: {len(api_products) if api_products else 0}")
+    # 2. ВкусВилл
+    print("🛒 ПОИСК В ВКУСВИЛЛ")
+    await update.message.reply_text("🛒 Ищу во ВкусВилл...")
+    vkusvill_products = await search_vkusvill_by_name(product_name)
     
-    if api_products:
-        context.user_data['api_products'] = api_products
-        result = await show_product_list(update, context, api_products, "api")
-        return result  # <-- ИСПРАВЛЕНО!
+    if vkusvill_products:
+        print(f"🛒 Найдено во ВкусВилл: {len(vkusvill_products)}")
+        context.user_data['api_products'] = vkusvill_products
+        result = await show_product_list(update, context, vkusvill_products, "vkusvill")
+        return result
 
     # 3. DeepSeek
     print("🤖 ПОИСК В DEEPSEEK")
-    await update.message.reply_text("🤖 Ищу в DeepSeek...")
+    await update.message.reply_text("🤖 Ищу через DeepSeek...")
     deepseek_products = await db.search_product_by_deepseek(product_name)
     
     if deepseek_products:
         context.user_data['api_products'] = deepseek_products
         result = await show_product_list(update, context, deepseek_products, "deepseek")
-        return result  # <-- ИСПРАВЛЕНО!
+        return result
     
     # 4. Ручной ввод
     print("❌ ПРОДУКТ НЕ НАЙДЕН")
     keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "❌ Продукт не найден.\n"
+        "❌ Продукт не найден ни в одном источнике.\n"
         "Введи КБЖУ на 100 г через запятую:\n"
         "Пример: 45, 1.2, 0.3, 8.5",
         reply_markup=reply_markup
@@ -338,6 +464,8 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     
     if source == "deepseek":
         await update.message.reply_text("🤖 Данные от DeepSeek (примерные):")
+    elif source == "vkusvill":
+        await update.message.reply_text("🛒 Данные от ВкусВилл:")
     
     back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
     back_markup = InlineKeyboardMarkup(back_button)
@@ -403,7 +531,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Сколько граммов ты съел?",
             reply_markup=reply_markup
         )
-        return ENTER_WEIGHT  # <-- ЯВНО ВОЗВРАЩАЕМ СОСТОЯНИЕ
+        return ENTER_WEIGHT
     
     # Если нет в локальной БД — ищем в API-продуктах
     api_products = context.user_data.get('api_products', [])
@@ -498,7 +626,6 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"⚖️ Текст: {update.message.text}")
     print(f"⚖️ context.user_data: {context.user_data}")
     
-    # Проверяем, не нажали ли "Назад"
     if update.callback_query and update.callback_query.data == "menu_back":
         query = update.callback_query
         await query.answer()
@@ -708,7 +835,7 @@ def main():
         ],
         ENTER_WEIGHT: [
             CallbackQueryHandler(enter_weight, pattern='^menu_back$'),
-            MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)  # <-- ТОЛЬКО ЦИФРЫ
+            MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)
         ]
     },
     fallbacks=[
@@ -725,9 +852,6 @@ def main():
     app.add_handler(CommandHandler('week', week))
     app.add_handler(CommandHandler('export', export_csv))
     app.add_handler(CommandHandler('cancel', cancel))
-    
-    # НЕ ДОБАВЛЯЙТЕ ГЛОБАЛЬНЫЙ CallbackQueryHandler для menu_back!
-    # Вместо этого, кнопки главного меню обрабатываются через conv_handler
     
     print("🤖 Бот запущен!")
     
