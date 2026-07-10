@@ -89,6 +89,8 @@ def format_history(entries):
     
     return result
 
+# --- КНОПКИ И МЕНЮ ---
+
 async def main_menu_keyboard():
     keyboard = [
         [InlineKeyboardButton("➕ Добавить продукт", callback_data="menu_add")],
@@ -114,7 +116,6 @@ async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     action = query.data
     
-    # menu_back обрабатывается в ConversationHandler, игнорируем здесь
     if action == "menu_back":
         return
     
@@ -157,7 +158,6 @@ async def search_vkusvill_by_barcode(barcode: str):
     try:
         search_url = "https://mcp001.vkusvill.ru/mcp"
         
-        # Поиск по штрих-коду
         payload = {
             "jsonrpc": "2.0",
             "method": "vkusvill_products_search",
@@ -176,7 +176,6 @@ async def search_vkusvill_by_barcode(barcode: str):
                         product_id = product.get('id')
                         
                         if product_id:
-                            # Получаем детальную информацию
                             detail_payload = {
                                 "jsonrpc": "2.0",
                                 "method": "vkusvill_product_details",
@@ -374,7 +373,49 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     )
     return ENTER_PRODUCT
 
-# --- ОСНОВНОЙ ПОИСК ПО ТЕКСТУ ---
+# --- ОСНОВНЫЕ ФУНКЦИИ ДОБАВЛЕНИЯ ---
+
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    
+    meal_types = await db.get_meal_types()
+    keyboard = [
+        [InlineKeyboardButton(mt['name'], callback_data=f"meal_{mt['id']}")]
+        for mt in meal_types
+    ]
+    keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text("🍽️ Выбери приём пищи:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("🍽️ Выбери приём пищи:", reply_markup=reply_markup)
+    return SELECT_MEAL
+
+async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "menu_back":
+        context.user_data.clear()
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+    
+    meal_id = int(query.data.split('_')[1])
+    context.user_data['meal_type_id'] = meal_id
+    print(f"🍽️ meal_type_id сохранён: {meal_id}")
+    
+    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu_back")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "📷 Отправь фото штрих-кода или напиши название продукта.\n\n"
+        "Если продукт не найдётся, я предложу ввести КБЖУ вручную.",
+        reply_markup=reply_markup
+    )
+    return ENTER_PRODUCT
 
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
@@ -509,11 +550,9 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     product_id = int(product_id_str)
     print(f"🎯 product_id: {product_id}")
     
-    # Сохраняем ID в контекст
     context.user_data['product_id'] = product_id
     print(f"✅ product_id сохранён: {product_id}")
     
-    # Ищем продукт в локальной БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
@@ -533,7 +572,6 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ENTER_WEIGHT
     
-    # Если нет в локальной БД — ищем в API-продуктах
     api_products = context.user_data.get('api_products', [])
     print(f"🔍 Ищем в API-продуктах ({len(api_products)} шт.)")
     
@@ -696,7 +734,7 @@ async def enter_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
         return ConversationHandler.END
 
-# --- ИСТОРИЯ ---
+# --- ИСТОРИЯ, НЕДЕЛЯ, ЭКСПОРТ ---
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -752,10 +790,6 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response)
     await show_main_menu(update, context)
 
-# --- ЭКСПОРТ CSV ---
-
-# --- ЭКСПОРТ CSV ---
-
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
@@ -797,7 +831,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filename=f"nutrition_{target_date.strftime('%Y-%m-%d')}.csv"
     )
     await show_main_menu(update, context)
-
 
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 
@@ -872,7 +905,6 @@ def main():
     
     loop.run_until_complete(start_web_server())
     app.run_polling()
-
 
 if __name__ == '__main__':
     main()
