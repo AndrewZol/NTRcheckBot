@@ -754,6 +754,8 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- ЭКСПОРТ CSV ---
 
+# --- ЭКСПОРТ CSV ---
+
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
@@ -796,6 +798,7 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await show_main_menu(update, context)
 
+
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 
 def main():
@@ -818,33 +821,33 @@ def main():
     loop.run_until_complete(set_commands())
     
     conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('add', add_start)],
-    states={
-        SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^(meal_|menu_back)')],
-        ENTER_PRODUCT: [
-            CallbackQueryHandler(enter_product, pattern='^menu_back$'),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_product),
-            MessageHandler(filters.PHOTO, enter_product)
+        entry_points=[CommandHandler('add', add_start)],
+        states={
+            SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^(meal_|menu_back)')],
+            ENTER_PRODUCT: [
+                CallbackQueryHandler(enter_product, pattern='^menu_back$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, enter_product),
+                MessageHandler(filters.PHOTO, enter_product)
+            ],
+            SELECT_PRODUCT_FROM_LIST: [
+                CallbackQueryHandler(select_product, pattern='^(prod_|menu_back)')
+            ],
+            MANUAL_ENTRY: [
+                CallbackQueryHandler(manual_entry, pattern='^menu_back$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry)
+            ],
+            ENTER_WEIGHT: [
+                CallbackQueryHandler(enter_weight, pattern='^menu_back$'),
+                MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)
+            ]
+        },
+        fallbacks=[
+            CommandHandler('cancel', cancel),
+            CommandHandler('add', add_start)
         ],
-        SELECT_PRODUCT_FROM_LIST: [
-            CallbackQueryHandler(select_product, pattern='^(prod_|menu_back)')
-        ],
-        MANUAL_ENTRY: [
-            CallbackQueryHandler(manual_entry, pattern='^menu_back$'),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry)
-        ],
-        ENTER_WEIGHT: [
-            CallbackQueryHandler(enter_weight, pattern='^menu_back$'),
-            MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)
-        ]
-    },
-    fallbacks=[
-        CommandHandler('cancel', cancel),
-        CommandHandler('add', add_start)
-    ],
-    per_message=False,
-    name="food_diary"
-)
+        per_message=False,
+        name="food_diary"
+    )
     
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler('start', start))
@@ -869,6 +872,7 @@ def main():
     
     loop.run_until_complete(start_web_server())
     app.run_polling()
+
 
 if __name__ == '__main__':
     main()
