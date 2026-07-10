@@ -150,6 +150,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # --- ПОИСК В ВКУСВИЛЛ ---
+
 async def search_vkusvill_by_barcode(barcode: str):
     """Ищет продукт по штрих-коду через MCP-сервер ВкусВилл."""
     print(f"🔍 ПОИСК В ВКУСВИЛЛ ПО ШТРИХ-КОДУ: {barcode}")
@@ -157,26 +158,81 @@ async def search_vkusvill_by_barcode(barcode: str):
     try:
         search_url = "https://mcp001.vkusvill.ru/mcp"
         
-        # Пробуем другой формат запроса
-        params = {
+        # Пробуем другой формат JSON-RPC
+        payload = {
+            "jsonrpc": "2.0",
             "method": "vkusvill_products_search",
-            "params": [barcode]
+            "params": [barcode],
+            "id": 1
         }
         
         print(f"📤 Отправка запроса к ВкусВилл: {search_url}")
-        print(f"📤 Params: {params}")
+        print(f"📤 Payload: {payload}")
         
         async with aiohttp.ClientSession() as session:
-            # Пробуем GET-запрос с параметрами
-            async with session.get(search_url, params=params, headers={"Accept": "application/json"}) as response:
+            async with session.post(
+                search_url,
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "Nutricheckbot/1.0"
+                }
+            ) as response:
                 print(f"📥 Статус ответа ВкусВилл: {response.status}")
                 
                 if response.status == 200:
                     data = await response.json()
                     print(f"📥 Ответ ВкусВилл: {data}")
-                    # ... обрабатываем ответ
+                    products = data.get('result', [])
+                    
+                    if products and len(products) > 0:
+                        print(f"📦 Найдено продуктов: {len(products)}")
+                        product = products[0]
+                        product_id = product.get('id')
+                        
+                        if product_id:
+                            detail_payload = {
+                                "jsonrpc": "2.0",
+                                "method": "vkusvill_product_details",
+                                "params": [product_id],
+                                "id": 2
+                            }
+                            
+                            async with session.post(search_url, json=detail_payload, headers={"Content-Type": "application/json"}) as detail_response:
+                                if detail_response.status == 200:
+                                    detail_data = await detail_response.json()
+                                    product_detail = detail_data.get('result', {})
+                                    
+                                    attributes = product_detail.get('attributes', {})
+                                    nutriments = {
+                                        'calories': attributes.get('calories') or attributes.get('energy_value') or 0,
+                                        'protein': attributes.get('protein') or 0,
+                                        'fat': attributes.get('fat') or 0,
+                                        'carbs': attributes.get('carbohydrates') or 0
+                                    }
+                                    
+                                    return [{
+                                        'id': str(product_id),
+                                        'name': product_detail.get('name', 'Без названия'),
+                                        'calories': float(nutriments['calories']),
+                                        'protein': float(nutriments['protein']),
+                                        'fat': float(nutriments['fat']),
+                                        'carbs': float(nutriments['carbs']),
+                                        'barcode': barcode,
+                                        'source': 'vkusvill'
+                                    }]
+                    else:
+                        print(f"❌ Продукты не найдены")
+                        return []
                 else:
                     print(f"❌ Ошибка HTTP ВкусВилл: {response.status}")
+                    # Пробуем прочитать тело ошибки
+                    try:
+                        error_body = await response.text()
+                        print(f"❌ Тело ошибки: {error_body}")
+                    except:
+                        pass
                     return []
     except Exception as e:
         print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
