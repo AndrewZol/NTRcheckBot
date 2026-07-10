@@ -272,9 +272,7 @@ async def search_vkusvill_by_name(product_name: str):
     return results
 
 # --- ПОИСК ПО ШТРИХ-КОДУ ---
-
 async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
-    """Ищет продукт по штрих-коду: локально → ВкусВилл → DeepSeek"""
     print(f"🔍 ПОИСК ПО ШТРИХ-КОДУ: {barcode}")
     
     # 1. Ищем в локальной базе
@@ -283,18 +281,23 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         print(f"✅ Найден в локальной БД: {product['name']}")
         context.user_data['product_id'] = product['id']
         
-        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        keyboard = [
+            [InlineKeyboardButton("⚖️ Ввести вес", callback_data=f"weight_{product['id']}")],
+            [InlineKeyboardButton("🗑️ Удалить и искать заново", callback_data=f"delete_{product['id']}")],
+            [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
+            f"📦 Найдено в вашей базе данных\n"
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
             f"🥩 {product['protein']}г | "
             f"🧈 {product['fat']}г | "
             f"🍞 {product['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?",
+            "Что хочешь сделать?",
             reply_markup=reply_markup
         )
-        return ENTER_WEIGHT
+        return SELECT_PRODUCT_FROM_LIST
     
     # 2. Ищем во ВкусВилл
     await update.message.reply_text("🛒 Ищу во ВкусВилл...")
@@ -321,6 +324,7 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
+            f"🛒 Найдено во ВкусВилл\n"
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
             f"🥩 {product['protein']}г | "
@@ -356,6 +360,7 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
+            f"🤖 Найдено через DeepSeek (примерные данные)\n"
             f"📦 {product['name']}\n"
             f"🔥 {product['calories']} ккал | "
             f"🥩 {product['protein']}г | "
@@ -372,6 +377,7 @@ async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         "Попробуй ввести название продукта текстом."
     )
     return ENTER_PRODUCT
+
 
 # --- ОСНОВНЫЕ ФУНКЦИИ ДОБАВЛЕНИЯ ---
 
@@ -503,35 +509,62 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products, source):
     print(f"📋 ПОКАЗ СПИСКА ({source})")
     
-    if source == "deepseek":
-        await update.message.reply_text("🤖 Данные от DeepSeek (примерные):")
-    elif source == "vkusvill":
-        await update.message.reply_text("🛒 Данные от ВкусВилл:")
-    
-    back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
-    back_markup = InlineKeyboardMarkup(back_button)
+    # Определяем текст источника
+    source_text = {
+        "local": "📦 Найдено в вашей базе данных",
+        "vkusvill": "🛒 Найдено во ВкусВилл",
+        "deepseek": "🤖 Найдено через DeepSeek (примерные данные)"
+    }.get(source, "📦 Найден продукт")
     
     if len(products) == 1:
         context.user_data['product_id'] = products[0]['id']
         print(f"📋 Единственный продукт: ID={products[0]['id']}")
+        
+        # Показываем источник и КБЖУ
         await update.message.reply_text(
+            f"{source_text}\n"
             f"📦 {products[0]['name']}\n"
             f"🔥 {products[0]['calories']} ккал | "
             f"🥩 {products[0]['protein']}г | "
             f"🧈 {products[0]['fat']}г | "
-            f"🍞 {products[0]['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?",
-            reply_markup=back_markup
+            f"🍞 {products[0]['carbs']}г на 100 г\n"
         )
-        return ENTER_WEIGHT
+        
+        # Если источник — локальная БД, показываем кнопки с удалением
+        if source == "local":
+            keyboard = [
+                [InlineKeyboardButton("⚖️ Ввести вес", callback_data=f"weight_{products[0]['id']}")],
+                [InlineKeyboardButton("🗑️ Удалить и искать заново", callback_data=f"delete_{products[0]['id']}")],
+                [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "Что хочешь сделать?",
+                reply_markup=reply_markup
+            )
+            return SELECT_PRODUCT_FROM_LIST
+        else:
+            # Для других источников — только ввод веса
+            back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+            reply_markup = InlineKeyboardMarkup(back_button)
+            await update.message.reply_text(
+                "Сколько граммов ты съел?",
+                reply_markup=reply_markup
+            )
+            return ENTER_WEIGHT
 
+    # Если несколько продуктов — список для выбора
     keyboard = []
     for idx, product in enumerate(products):
         btn_text = f"{idx+1}. {product['name']} ({product['calories']} ккал/100г)"
         keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{product['id']}")])
     keyboard.append([InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🔍 Выбери продукт:", reply_markup=reply_markup)
+    
+    await update.message.reply_text(
+        f"{source_text}. Выбери продукт:",
+        reply_markup=reply_markup
+    )
     return SELECT_PRODUCT_FROM_LIST
 
 async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -546,6 +579,41 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context)
         return ConversationHandler.END
     
+    # Обработка кнопки "Ввести вес"
+    if query.data.startswith("weight_"):
+        product_id = int(query.data.split('_')[1])
+        context.user_data['product_id'] = product_id
+        
+        back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        reply_markup = InlineKeyboardMarkup(back_button)
+        await query.edit_message_text(
+            "Сколько граммов ты съел?",
+            reply_markup=reply_markup
+        )
+        return ENTER_WEIGHT
+    
+    # Обработка кнопки "Удалить"
+    if query.data.startswith("delete_"):
+        product_id = int(query.data.split('_')[1])
+        print(f"🗑️ Удаление продукта ID={product_id}")
+        
+        # Удаляем продукт из локальной БД
+        try:
+            async with db.pool.acquire() as conn:
+                await conn.execute('DELETE FROM products WHERE id = $1', product_id)
+            print(f"✅ Продукт удалён из БД")
+            await query.edit_message_text(
+                f"🗑️ Продукт удалён из вашей базы.\n"
+                "Начни поиск заново через /add"
+            )
+            # Показываем главное меню
+            await show_main_menu(update, context)
+        except Exception as e:
+            print(f"❌ Ошибка удаления: {e}")
+            await query.edit_message_text(f"❌ Ошибка удаления: {e}")
+        return ConversationHandler.END
+    
+    # Обычный выбор продукта из списка
     product_id_str = query.data.split('_')[1]
     product_id = int(product_id_str)
     print(f"🎯 product_id: {product_id}")
@@ -553,13 +621,19 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['product_id'] = product_id
     print(f"✅ product_id сохранён: {product_id}")
     
+    # Ищем продукт в локальной БД
     async with db.pool.acquire() as conn:
         product = await conn.fetchrow('SELECT * FROM products WHERE id = $1', product_id)
     
     if product:
         print(f"✅ Найден в локальной БД: {product['name']}")
         
-        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+        # Проверяем источник (если продукт из локальной БД)
+        keyboard = [
+            [InlineKeyboardButton("⚖️ Ввести вес", callback_data=f"weight_{product['id']}")],
+            [InlineKeyboardButton("🗑️ Удалить и искать заново", callback_data=f"delete_{product['id']}")],
+            [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             f"📦 {product['name']}\n"
@@ -567,11 +641,12 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🥩 {product['protein']}г | "
             f"🧈 {product['fat']}г | "
             f"🍞 {product['carbs']}г на 100 г\n\n"
-            "Сколько граммов ты съел?",
+            "Что хочешь сделать?",
             reply_markup=reply_markup
         )
-        return ENTER_WEIGHT
+        return SELECT_PRODUCT_FROM_LIST
     
+    # Если нет в локальной БД — ищем в API-продуктах
     api_products = context.user_data.get('api_products', [])
     print(f"🔍 Ищем в API-продуктах ({len(api_products)} шт.)")
     
@@ -597,8 +672,9 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data['product_id'] = product['id']
                 print(f"✅ product_id обновлён: {product['id']}")
                 
-                keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
+                # Для продуктов из API — только ввод веса
+                back_button = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
+                reply_markup = InlineKeyboardMarkup(back_button)
                 await query.edit_message_text(
                     f"📦 {product['name']}\n"
                     f"🔥 {product['calories']} ккал | "
