@@ -1077,7 +1077,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_main_menu(update, context)
 
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
-
 def main():
     import asyncio
     loop = asyncio.new_event_loop()
@@ -1128,11 +1127,14 @@ def main():
     
     app.add_handler(conv_handler)
     
-    # --- НОВЫЕ ОБРАБОТЧИКИ ---
-    # Убираем лишний обработчик manual_entry, так как он уже есть в ConversationHandler
-    app.add_handler(CallbackQueryHandler(handle_vkusvill_search, pattern='^vkusvill_search_'))
-    # --- КОНЕЦ НОВЫХ ОБРАБОТЧИКОВ ---
+    # --- ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ ---
+    # Обработчик кнопок главного меню
+    app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
     
+    # Обработчик поиска во ВкусВилл
+    app.add_handler(CallbackQueryHandler(handle_vkusvill_search, pattern='^vkusvill_search_'))
+    
+    # Обработчики команд
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('history', history))
     app.add_handler(CommandHandler('week', week))
