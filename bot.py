@@ -14,18 +14,19 @@ from config import BOT_TOKEN
 from database import Database
 
 # --- Состояния ---
+print("🚀 [0.1] Импорты выполнены, создаю объект Database...", flush=True)
 (
     SELECT_MEAL, ENTER_PRODUCT, ENTER_WEIGHT, 
     MANUAL_ENTRY, SELECT_PRODUCT_FROM_LIST
 ) = range(5)
 
 db = Database()
-
+print("🚀 [0.2] Объект Database создан.", flush=True)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-
+print("🚀 [0.3] Логирование настроено.", flush=True)
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def format_nutrition(name: str, weight: float, calories: float, 
