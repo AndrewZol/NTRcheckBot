@@ -116,6 +116,7 @@ async def handle_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     action = query.data
     
+    # menu_back обрабатывается в ConversationHandler — игнорируем здесь
     if action == "menu_back":
         return
     
