@@ -1079,83 +1079,106 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 def main():
-    print("🚀 Бот начинает запуск...")
+    import sys
+    import traceback
     import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(db.connect())
-    loop.run_until_complete(db.create_tables())
     
-    app = Application.builder().token(BOT_TOKEN).build()
-    
-    async def set_commands():
-        await app.bot.set_my_commands([
-            ("add", "➕ Добавить продукт"),
-            ("history", "📊 Сводка за сегодня"),
-            ("week", "📈 Статистика за 7 дней"),
-            ("export", "📁 Выгрузить CSV"),
-            ("cancel", "❌ Отменить действие"),
-        ])
-    loop.run_until_complete(set_commands())
-    
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('add', add_start)],
-        states={
-            SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^(meal_|menu_back)')],
-            ENTER_PRODUCT: [
-                CallbackQueryHandler(enter_product, pattern='^menu_back$'),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, enter_product),
-                MessageHandler(filters.PHOTO, enter_product)
+    try:
+        print("🚀 [1] Бот начинает запуск...", flush=True)
+        
+        print("🚀 [2] Создаю цикл событий...", flush=True)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        print("🚀 [3] Цикл событий создан.", flush=True)
+        
+        print("🚀 [4] Подключаюсь к базе данных...", flush=True)
+        loop.run_until_complete(db.connect())
+        print("🚀 [5] Подключение к БД успешно.", flush=True)
+        
+        print("🚀 [6] Создаю таблицы...", flush=True)
+        loop.run_until_complete(db.create_tables())
+        print("🚀 [7] Таблицы созданы/проверены.", flush=True)
+        
+        print("🚀 [8] Создаю приложение Telegram...", flush=True)
+        app = Application.builder().token(BOT_TOKEN).build()
+        print("🚀 [9] Приложение Telegram создано.", flush=True)
+        
+        async def set_commands():
+            await app.bot.set_my_commands([
+                ("add", "➕ Добавить продукт"),
+                ("history", "📊 Сводка за сегодня"),
+                ("week", "📈 Статистика за 7 дней"),
+                ("export", "📁 Выгрузить CSV"),
+                ("cancel", "❌ Отменить действие"),
+            ])
+        print("🚀 [10] Устанавливаю команды бота...", flush=True)
+        loop.run_until_complete(set_commands())
+        print("🚀 [11] Команды установлены.", flush=True)
+        
+        print("🚀 [12] Создаю ConversationHandler...", flush=True)
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('add', add_start)],
+            states={
+                SELECT_MEAL: [CallbackQueryHandler(select_meal, pattern='^(meal_|menu_back)')],
+                ENTER_PRODUCT: [
+                    CallbackQueryHandler(enter_product, pattern='^menu_back$'),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, enter_product),
+                    MessageHandler(filters.PHOTO, enter_product)
+                ],
+                SELECT_PRODUCT_FROM_LIST: [
+                    CallbackQueryHandler(select_product, pattern='^(prod_|menu_back|weight_|delete_)')
+                ],
+                MANUAL_ENTRY: [
+                    CallbackQueryHandler(manual_entry, pattern='^menu_back$'),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry)
+                ],
+                ENTER_WEIGHT: [
+                    CallbackQueryHandler(enter_weight, pattern='^menu_back$'),
+                    MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)
+                ]
+            },
+            fallbacks=[
+                CommandHandler('cancel', cancel),
+                CommandHandler('add', add_start)
             ],
-            SELECT_PRODUCT_FROM_LIST: [
-                CallbackQueryHandler(select_product, pattern='^(prod_|menu_back|weight_|delete_)')
-            ],
-            MANUAL_ENTRY: [
-                CallbackQueryHandler(manual_entry, pattern='^menu_back$'),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry)
-            ],
-            ENTER_WEIGHT: [
-                CallbackQueryHandler(enter_weight, pattern='^menu_back$'),
-                MessageHandler(filters.Regex(r'^[\d.,]+$'), enter_weight)
-            ]
-        },
-        fallbacks=[
-            CommandHandler('cancel', cancel),
-            CommandHandler('add', add_start)
-        ],
-        per_message=False,
-        name="food_diary"
-    )
-    
-    app.add_handler(conv_handler)
-    
-    # --- ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ ---
-    # Обработчик кнопок главного меню
-    app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
-    
-    # Обработчик поиска во ВкусВилл
-    app.add_handler(CallbackQueryHandler(handle_vkusvill_search, pattern='^vkusvill_search_'))
-    
-    # Обработчики команд
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('history', history))
-    app.add_handler(CommandHandler('week', week))
-    app.add_handler(CommandHandler('export', export_csv))
-    app.add_handler(CommandHandler('cancel', cancel))
-    
-    print("🤖 Бот запущен!")
-    
-    async def start_web_server():
-        from aiohttp import web
-        async def health_check(request):
-            return web.Response(text="OK")
-        app_web = web.Application()
-        app_web.router.add_get('/', health_check)
-        runner = web.AppRunner(app_web)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 10000)
-        await site.start()
-        print("🌐 Web server started on port 10000")
-    
-    loop.run_until_complete(start_web_server())
-    app.run_polling()
+            per_message=False,
+            name="food_diary"
+        )
+        print("🚀 [13] ConversationHandler создан.", flush=True)
+        
+        print("🚀 [14] Добавляю обработчики...", flush=True)
+        app.add_handler(conv_handler)
+        app.add_handler(CallbackQueryHandler(handle_menu_button, pattern='^menu_'))
+        app.add_handler(CallbackQueryHandler(handle_vkusvill_search, pattern='^vkusvill_search_'))
+        app.add_handler(CommandHandler('start', start))
+        app.add_handler(CommandHandler('history', history))
+        app.add_handler(CommandHandler('week', week))
+        app.add_handler(CommandHandler('export', export_csv))
+        app.add_handler(CommandHandler('cancel', cancel))
+        print("🚀 [15] Обработчики добавлены.", flush=True)
+        
+        print("🤖 Бот запущен!", flush=True)
+        
+        async def start_web_server():
+            from aiohttp import web
+            async def health_check(request):
+                return web.Response(text="OK")
+            app_web = web.Application()
+            app_web.router.add_get('/', health_check)
+            runner = web.AppRunner(app_web)
+            await runner.setup()
+            site = web.TCPSite(runner, '0.0.0.0', 10000)
+            await site.start()
+            print("🌐 Web server started on port 10000", flush=True)
+        
+        print("🚀 [16] Запускаю веб-сервер...", flush=True)
+        loop.run_until_complete(start_web_server())
+        print("🚀 [17] Веб-сервер запущен.", flush=True)
+        
+        print("🚀 [18] Запускаю polling...", flush=True)
+        app.run_polling()
+        
+    except Exception as e:
+        print(f"🔥 КРИТИЧЕСКАЯ ОШИБКА: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)
