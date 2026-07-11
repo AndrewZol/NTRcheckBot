@@ -246,64 +246,128 @@ async def search_vkusvill_by_barcode(barcode: str):
 
 # --- НАЧАЛО ФУНКЦИИ: search_vkusvill_by_name ---
 async def search_vkusvill_by_name(product_name: str):
-    """Ищет продукты по названию через MCP-сервер ВкусВилл."""
+    """Ищет продукты по названию через MCP-сервер ВкусВилл.
+    Возвращает список продуктов с id, названием и КБЖУ."""
     print(f"🔍 ПОИСК В ВКУСВИЛЛ ПО НАЗВАНИЮ: {product_name}")
     
     try:
         search_url = "https://mcp001.vkusvill.ru/mcp"
         
-        payload = {
+        # 1. Ищем продукты по названию
+        search_payload = {
             "jsonrpc": "2.0",
             "method": "vkusvill_products_search",
-            "params": [product_name],
+            "params": [product_name, 1, "popularity"],  # q, page, sort
             "id": 1
         }
         
+        print(f"📤 Поисковый запрос: {search_payload}")
+        
         results = []
         async with aiohttp.ClientSession() as session:
-            async with session.post(search_url, json=payload, headers={"Content-Type": "application/json"}) as response:
+            async with session.post(
+                search_url,
+                json=search_payload,
+                headers={"Content-Type": "application/json"}
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    products = data.get('result', [])
+                    print(f"📥 Ответ API: {data}")
                     
-                    if products and len(products) > 0:
-                        for idx, product in enumerate(products[:5]):
-                            product_id = product.get('id')
-                            if product_id:
-                                detail_payload = {
-                                    "jsonrpc": "2.0",
-                                    "method": "vkusvill_product_details",
-                                    "params": [product_id],
-                                    "id": idx + 2
-                                }
+                    # Проверяем, есть ли результат
+                    result_data = data.get('result', {})
+                    items = result_data.get('items', [])
+                    
+                    if not items:
+                        print(f"❌ Продукты не найдены")
+                        return []
+                    
+                    print(f"📦 Найдено продуктов: {len(items)}")
+                    
+                    # 2. Для каждого продукта получаем детали
+                    for idx, item in enumerate(items[:5]):  # Берём первые 5
+                        product_id = item.get('id')
+                        if not product_id:
+                            continue
+                        
+                        # Запрашиваем детали продукта
+                        detail_payload = {
+                            "jsonrpc": "2.0",
+                            "method": "vkusvill_product_details",
+                            "params": [product_id],
+                            "id": idx + 2
+                        }
+                        
+                        print(f"📤 Запрос деталей для ID {product_id}: {detail_payload}")
+                        
+                        async with session.post(
+                            search_url,
+                            json=detail_payload,
+                            headers={"Content-Type": "application/json"}
+                        ) as detail_response:
+                            if detail_response.status == 200:
+                                detail_data = await detail_response.json()
+                                product_detail = detail_data.get('result', {})
                                 
-                                async with session.post(search_url, json=detail_payload, headers={"Content-Type": "application/json"}) as detail_response:
-                                    if detail_response.status == 200:
-                                        detail_data = await detail_response.json()
-                                        product_detail = detail_data.get('result', {})
+                                # Извлекаем КБЖУ из properties
+                                calories = 0
+                                protein = 0
+                                fat = 0
+                                carbs = 0
+                                
+                                properties = product_detail.get('properties', [])
+                                for prop in properties:
+                                    if prop.get('name') == "Пищевая и энергетическая ценность в 100 г":
+                                        nutrition_text = prop.get('value', '')
+                                        print(f"📊 Найден текст с КБЖУ: {nutrition_text}")
                                         
-                                        attributes = product_detail.get('attributes', {})
-                                        nutriments = {
-                                            'calories': attributes.get('calories') or attributes.get('energy_value') or 0,
-                                            'protein': attributes.get('protein') or 0,
-                                            'fat': attributes.get('fat') or 0,
-                                            'carbs': attributes.get('carbohydrates') or 0
-                                        }
+                                        # Парсим КБЖУ из текста
+                                        # Ищем калории
+                                        import re
+                                        kcal_match = re.search(r'(\d+[.,]?\d*)\s*ккал', nutrition_text)
+                                        if kcal_match:
+                                            calories = float(kcal_match.group(1).replace(',', '.'))
                                         
-                                        results.append({
-                                            'id': str(product_id),
-                                            'name': product_detail.get('name', product.get('name', 'Без названия')),
-                                            'calories': float(nutriments['calories']),
-                                            'protein': float(nutriments['protein']),
-                                            'fat': float(nutriments['fat']),
-                                            'carbs': float(nutriments['carbs']),
-                                            'barcode': '',
-                                            'source': 'vkusvill'
-                                        })
+                                        # Ищем белки
+                                        protein_match = re.search(r'белки\s*(\d+[.,]?\d*)', nutrition_text)
+                                        if protein_match:
+                                            protein = float(protein_match.group(1).replace(',', '.'))
+                                        
+                                        # Ищем жиры
+                                        fat_match = re.search(r'жиры\s*(\d+[.,]?\d*)', nutrition_text)
+                                        if fat_match:
+                                            fat = float(fat_match.group(1).replace(',', '.'))
+                                        
+                                        # Ищем углеводы
+                                        carbs_match = re.search(r'углеводы\s*(\d+[.,]?\d*)', nutrition_text)
+                                        if carbs_match:
+                                            carbs = float(carbs_match.group(1).replace(',', '.'))
+                                        
+                                        print(f"✅ Распарсено КБЖУ: {calories} ккал, {protein}г б, {fat}г ж, {carbs}г у")
+                                        break
+                                
+                                results.append({
+                                    'id': str(product_id),
+                                    'name': item.get('name', 'Без названия'),
+                                    'calories': calories,
+                                    'protein': protein,
+                                    'fat': fat,
+                                    'carbs': carbs,
+                                    'barcode': '',
+                                    'source': 'vkusvill'
+                                })
+                            else:
+                                print(f"❌ Ошибка при получении деталей для ID {product_id}: {detail_response.status}")
+                    
+                    return results
+                else:
+                    print(f"❌ Ошибка HTTP: {response.status}")
+                    return []
     except Exception as e:
         print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
-    
-    return results
+        import traceback
+        traceback.print_exc()
+        return []
 # --- КОНЕЦ ФУНКЦИИ: search_vkusvill_by_name ---
 
 
