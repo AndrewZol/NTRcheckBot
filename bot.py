@@ -261,7 +261,7 @@ async def search_vkusvill_by_name(product_name: str):
                 "q": product_name,
                 "page": 1,
                 "sort": "popularity",
-                "vvonly": 1  # Только товары ВкусВилл
+                "vvonly": 1
             },
             "id": 1
         }
@@ -270,6 +270,7 @@ async def search_vkusvill_by_name(product_name: str):
         
         results = []
         import re
+        import json
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -286,14 +287,32 @@ async def search_vkusvill_by_name(product_name: str):
                     data = await response.json()
                     print(f"📥 Ответ API: {data}")
                     
-                    # Проверяем наличие ошибки
+                    # Проверяем наличие ошибки в стандартном JSON-RPC формате
                     if 'error' in data:
                         print(f"❌ Ошибка API: {data['error']}")
                         return []
                     
-                    # Извлекаем items из структуры ответа
-                    result_data = data.get('result', {})
-                    items = result_data.get('items', [])
+                    # Извлекаем items из структуры ответа (как в MCP Inspector)
+                    # Ответ может быть в формате {'content': [{'type': 'text', 'text': '...'}]}
+                    items = []
+                    
+                    if 'result' in data:
+                        # Стандартный JSON-RPC формат
+                        result_data = data.get('result', {})
+                        items = result_data.get('items', [])
+                    elif 'content' in data:
+                        # Формат MCP Inspector
+                        for content_item in data.get('content', []):
+                            if content_item.get('type') == 'text':
+                                try:
+                                    # Парсим JSON внутри text
+                                    inner_data = json.loads(content_item.get('text', '{}'))
+                                    if inner_data.get('ok'):
+                                        items = inner_data.get('data', {}).get('items', [])
+                                        break
+                                except json.JSONDecodeError:
+                                    print(f"❌ Ошибка парсинга JSON из content")
+                                    continue
                     
                     if not items:
                         print(f"❌ Продукты не найдены")
@@ -302,7 +321,7 @@ async def search_vkusvill_by_name(product_name: str):
                     print(f"📦 Найдено продуктов: {len(items)}")
                     
                     # 2. Для каждого продукта получаем детали
-                    for idx, item in enumerate(items[:5]):  # Берём первые 5
+                    for idx, item in enumerate(items[:5]):
                         product_id = item.get('id')
                         if not product_id:
                             continue
@@ -329,7 +348,21 @@ async def search_vkusvill_by_name(product_name: str):
                         ) as detail_response:
                             if detail_response.status == 200:
                                 detail_data = await detail_response.json()
-                                product_detail = detail_data.get('result', {})
+                                
+                                # Аналогично обрабатываем ответ для деталей
+                                product_detail = {}
+                                if 'result' in detail_data:
+                                    product_detail = detail_data.get('result', {})
+                                elif 'content' in detail_data:
+                                    for content_item in detail_data.get('content', []):
+                                        if content_item.get('type') == 'text':
+                                            try:
+                                                inner_data = json.loads(content_item.get('text', '{}'))
+                                                if inner_data.get('ok'):
+                                                    product_detail = inner_data.get('data', {})
+                                                    break
+                                            except json.JSONDecodeError:
+                                                continue
                                 
                                 # Извлекаем КБЖУ из properties
                                 calories = 0
@@ -343,7 +376,6 @@ async def search_vkusvill_by_name(product_name: str):
                                         nutrition_text = prop.get('value', '')
                                         print(f"📊 Найден текст с КБЖУ: {nutrition_text[:100]}...")
                                         
-                                        # Парсим КБЖУ из текста
                                         kcal_match = re.search(r'(\d+[.,]?\d*)\s*ккал', nutrition_text)
                                         if kcal_match:
                                             calories = float(kcal_match.group(1).replace(',', '.'))
