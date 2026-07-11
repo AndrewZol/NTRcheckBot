@@ -243,185 +243,142 @@ async def search_vkusvill_by_barcode(barcode: str):
         import traceback
         traceback.print_exc()
         return []
-
 # --- НАЧАЛО ФУНКЦИИ: search_vkusvill_by_name ---
 async def search_vkusvill_by_name(product_name: str):
-    """Ищет продукты по названию через MCP-сервер ВкусВилл.
-    Возвращает список продуктов с id, названием и КБЖУ."""
+    """Ищет продукты по названию через MCP-сервер ВкусВилл."""
     print(f"🔍 ПОИСК В ВКУСВИЛЛ ПО НАЗВАНИЮ: {product_name}")
     
     try:
-        search_url = "https://mcp001.vkusvill.ru/mcp"
+        # Используем MCP-клиент для подключения к серверу ВкусВилл
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
         
-        # 1. Ищем продукты по названию (согласно Tool Definition)
-        search_payload = {
-            "jsonrpc": "2.0",
-            "method": "vkusvill_products_search",
-            "params": {
-                "q": product_name,
-                "page": 1,
-                "sort": "popularity",
-                "vvonly": 1
-            },
-            "id": 1
-        }
-        
-        print(f"📤 Поисковый запрос: {search_payload}")
+        # Создаём параметры подключения к MCP-серверу
+        server_params = StdioServerParameters(
+            command="npx",
+            args=["-y", "@modelcontextprotocol/inspector", "connect", "https://mcp001.vkusvill.ru/mcp"],
+            env=None
+        )
         
         results = []
         import re
-        import json
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                search_url,
-                json=search_payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
-                }
-            ) as response:
-                print(f"📥 Статус ответа: {response.status}")
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Инициализируем сессию
+                await session.initialize()
                 
-                if response.status == 200:
-                    data = await response.json()
-                    print(f"📥 Ответ API: {data}")
-                    
-                    # Проверяем наличие ошибки в стандартном JSON-RPC формате
-                    if 'error' in data:
-                        print(f"❌ Ошибка API: {data['error']}")
-                        return []
-                    
-                    # Извлекаем items из структуры ответа (как в MCP Inspector)
-                    # Ответ может быть в формате {'content': [{'type': 'text', 'text': '...'}]}
-                    items = []
-                    
-                    if 'result' in data:
-                        # Стандартный JSON-RPC формат
-                        result_data = data.get('result', {})
-                        items = result_data.get('items', [])
-                    elif 'content' in data:
-                        # Формат MCP Inspector
-                        for content_item in data.get('content', []):
-                            if content_item.get('type') == 'text':
-                                try:
-                                    # Парсим JSON внутри text
-                                    inner_data = json.loads(content_item.get('text', '{}'))
-                                    if inner_data.get('ok'):
-                                        items = inner_data.get('data', {}).get('items', [])
-                                        break
-                                except json.JSONDecodeError:
-                                    print(f"❌ Ошибка парсинга JSON из content")
-                                    continue
-                    
-                    if not items:
-                        print(f"❌ Продукты не найдены")
-                        return []
-                    
-                    print(f"📦 Найдено продуктов: {len(items)}")
-                    
-                    # 2. Для каждого продукта получаем детали
-                    for idx, item in enumerate(items[:5]):
-                        product_id = item.get('id')
-                        if not product_id:
-                            continue
-                        
-                        # Запрашиваем детали продукта
-                        detail_payload = {
-                            "jsonrpc": "2.0",
-                            "method": "vkusvill_product_details",
-                            "params": {
-                                "id": product_id
-                            },
-                            "id": idx + 2
-                        }
-                        
-                        print(f"📤 Запрос деталей для ID {product_id}")
-                        
-                        async with session.post(
-                            search_url,
-                            json=detail_payload,
-                            headers={
-                                "Content-Type": "application/json",
-                                "Accept": "application/json"
-                            }
-                        ) as detail_response:
-                            if detail_response.status == 200:
-                                detail_data = await detail_response.json()
+                # Получаем список доступных инструментов
+                tools = await session.list_tools()
+                print(f"📋 Доступные инструменты: {[tool.name for tool in tools.tools]}")
+                
+                # Вызываем метод поиска продуктов
+                search_result = await session.call_tool(
+                    "vkusvill_products_search",
+                    arguments={
+                        "q": product_name,
+                        "page": 1,
+                        "sort": "popularity",
+                        "vvonly": 1
+                    }
+                )
+                
+                print(f"📥 Результат поиска: {search_result}")
+                
+                # Извлекаем данные из ответа
+                if search_result.content:
+                    for content_item in search_result.content:
+                        if content_item.type == "text":
+                            import json
+                            try:
+                                data = json.loads(content_item.text)
+                                items = data.get('data', {}).get('items', [])
                                 
-                                # Аналогично обрабатываем ответ для деталей
-                                product_detail = {}
-                                if 'result' in detail_data:
-                                    product_detail = detail_data.get('result', {})
-                                elif 'content' in detail_data:
-                                    for content_item in detail_data.get('content', []):
-                                        if content_item.get('type') == 'text':
-                                            try:
-                                                inner_data = json.loads(content_item.get('text', '{}'))
-                                                if inner_data.get('ok'):
-                                                    product_detail = inner_data.get('data', {})
+                                if not items:
+                                    print(f"❌ Продукты не найдены")
+                                    return []
+                                
+                                print(f"📦 Найдено продуктов: {len(items)}")
+                                
+                                # Для каждого продукта получаем детали
+                                for idx, item in enumerate(items[:5]):
+                                    product_id = item.get('id')
+                                    if not product_id:
+                                        continue
+                                    
+                                    # Получаем детали продукта
+                                    detail_result = await session.call_tool(
+                                        "vkusvill_product_details",
+                                        arguments={"id": product_id}
+                                    )
+                                    
+                                    # Извлекаем КБЖУ
+                                    product_detail = {}
+                                    if detail_result.content:
+                                        for detail_item in detail_result.content:
+                                            if detail_item.type == "text":
+                                                try:
+                                                    detail_data = json.loads(detail_item.text)
+                                                    product_detail = detail_data.get('data', {})
                                                     break
-                                            except json.JSONDecodeError:
-                                                continue
+                                                except:
+                                                    continue
+                                    
+                                    # Парсим КБЖУ из properties
+                                    calories = 0
+                                    protein = 0
+                                    fat = 0
+                                    carbs = 0
+                                    
+                                    properties = product_detail.get('properties', [])
+                                    for prop in properties:
+                                        if prop.get('name') == "Пищевая и энергетическая ценность в 100 г":
+                                            nutrition_text = prop.get('value', '')
+                                            
+                                            kcal_match = re.search(r'(\d+[.,]?\d*)\s*ккал', nutrition_text)
+                                            if kcal_match:
+                                                calories = float(kcal_match.group(1).replace(',', '.'))
+                                            
+                                            protein_match = re.search(r'белки\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
+                                            if protein_match:
+                                                protein = float(protein_match.group(1).replace(',', '.'))
+                                            
+                                            fat_match = re.search(r'жиры\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
+                                            if fat_match:
+                                                fat = float(fat_match.group(1).replace(',', '.'))
+                                            
+                                            carbs_match = re.search(r'углеводы\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
+                                            if carbs_match:
+                                                carbs = float(carbs_match.group(1).replace(',', '.'))
+                                            
+                                            break
+                                    
+                                    results.append({
+                                        'id': str(product_id),
+                                        'name': item.get('name', 'Без названия'),
+                                        'calories': calories,
+                                        'protein': protein,
+                                        'fat': fat,
+                                        'carbs': carbs,
+                                        'barcode': '',
+                                        'source': 'vkusvill'
+                                    })
                                 
-                                # Извлекаем КБЖУ из properties
-                                calories = 0
-                                protein = 0
-                                fat = 0
-                                carbs = 0
-                                
-                                properties = product_detail.get('properties', [])
-                                for prop in properties:
-                                    if prop.get('name') == "Пищевая и энергетическая ценность в 100 г":
-                                        nutrition_text = prop.get('value', '')
-                                        print(f"📊 Найден текст с КБЖУ: {nutrition_text[:100]}...")
-                                        
-                                        kcal_match = re.search(r'(\d+[.,]?\d*)\s*ккал', nutrition_text)
-                                        if kcal_match:
-                                            calories = float(kcal_match.group(1).replace(',', '.'))
-                                        
-                                        protein_match = re.search(r'белки\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
-                                        if protein_match:
-                                            protein = float(protein_match.group(1).replace(',', '.'))
-                                        
-                                        fat_match = re.search(r'жиры\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
-                                        if fat_match:
-                                            fat = float(fat_match.group(1).replace(',', '.'))
-                                        
-                                        carbs_match = re.search(r'углеводы\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
-                                        if carbs_match:
-                                            carbs = float(carbs_match.group(1).replace(',', '.'))
-                                        
-                                        print(f"✅ Распарсено КБЖУ: {calories} ккал, {protein}г б, {fat}г ж, {carbs}г у")
-                                        break
-                                
-                                results.append({
-                                    'id': str(product_id),
-                                    'name': item.get('name', 'Без названия'),
-                                    'calories': calories,
-                                    'protein': protein,
-                                    'fat': fat,
-                                    'carbs': carbs,
-                                    'barcode': '',
-                                    'source': 'vkusvill'
-                                })
-                            else:
-                                print(f"❌ Ошибка при получении деталей для ID {product_id}: {detail_response.status}")
-                    
-                    return results
-                else:
-                    try:
-                        error_body = await response.text()
-                        print(f"❌ Тело ошибки: {error_body}")
-                    except:
-                        pass
-                    return []
+                                return results
+                            except json.JSONDecodeError as e:
+                                print(f"❌ Ошибка парсинга JSON: {e}")
+                                return []
+                
+                print(f"❌ Не удалось получить данные от ВкусВилл")
+                return []
+                
     except Exception as e:
         print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
         import traceback
         traceback.print_exc()
         return []
 # --- КОНЕЦ ФУНКЦИИ: search_vkusvill_by_name ---
+
 
 
 # --- НАЧАЛО ФУНКЦИИ: search_product_by_barcode_with_suggestion ---
