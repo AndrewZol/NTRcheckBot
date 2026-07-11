@@ -240,7 +240,7 @@ async def search_vkusvill_by_barcode(barcode: str):
         traceback.print_exc()
         return []
 
-
+# --- НАЧАЛО ФУНКЦИИ: search_vkusvill_by_name ---
 async def search_vkusvill_by_name(product_name: str):
     """Ищет продукты по названию через MCP-сервер ВкусВилл."""
     print(f"🔍 ПОИСК В ВКУСВИЛЛ ПО НАЗВАНИЮ: {product_name}")
@@ -300,6 +300,101 @@ async def search_vkusvill_by_name(product_name: str):
         print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
     
     return results
+# --- КОНЕЦ ФУНКЦИИ: search_vkusvill_by_name ---
+
+
+# --- НАЧАЛО ФУНКЦИИ: search_product_by_barcode_with_suggestion ---
+async def search_product_by_barcode_with_suggestion(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
+    """Поиск по штрих-коду с предложением поискать во ВкусВилл."""
+    print(f"🔍 ПОИСК ПО ШТРИХ-КОДУ С ПРЕДЛОЖЕНИЕМ: {barcode}")
+    
+    # Сохраняем штрих-код для повторного поиска
+    context.user_data['current_barcode'] = barcode
+    
+    # 1. Ищем в локальной базе
+    product = await db.find_product_by_barcode(barcode)
+    if product:
+        print(f"✅ Найден в локальной БД: {product['name']}")
+        context.user_data['product_id'] = product['id']
+        
+        keyboard = [
+            [InlineKeyboardButton("⚖️ Ввести вес", callback_data=f"weight_{product['id']}")],
+            [InlineKeyboardButton("🗑️ Удалить и искать заново", callback_data=f"delete_{product['id']}")],
+            [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"📦 Найдено в вашей базе данных\n"
+            f"📦 {product['name']}\n"
+            f"🔥 {product['calories']} ккал | "
+            f"🥩 {product['protein']}г | "
+            f"🧈 {product['fat']}г | "
+            f"🍞 {product['carbs']}г на 100 г\n\n"
+            "Что хочешь сделать?",
+            reply_markup=reply_markup
+        )
+        return SELECT_PRODUCT_FROM_LIST
+    
+    # 2. Ищем название в Open Food Facts
+    await update.message.reply_text("🌐 Ищу название продукта в Open Food Facts...")
+    off_products = await db.search_product_by_barcode(barcode)
+    
+    if off_products and len(off_products) > 0:
+        product_name = off_products[0].get('name', '')
+        context.user_data['off_product_name'] = product_name
+        
+        print(f"✅ Найдено название в Open Food Facts: {product_name}")
+        
+        # 3. Предлагаем поискать во ВкусВилл
+        keyboard = [
+            [InlineKeyboardButton("✅ Да, искать во ВкусВилл", callback_data=f"vkusvill_search_{barcode}")],
+            [InlineKeyboardButton("❌ Нет, ввести вручную", callback_data="manual_entry")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"🔍 В Open Food Facts найден продукт: {product_name}\n\n"
+            "Хотите найти его КБЖУ во ВкусВилл?",
+            reply_markup=reply_markup
+        )
+        return SELECT_PRODUCT_FROM_LIST
+    
+    # 4. Если ничего не найдено
+    await update.message.reply_text(
+        f"❌ Продукт со штрих-кодом {barcode} не найден.\n"
+        "Попробуй ввести название продукта текстом."
+    )
+    return ENTER_PRODUCT
+# --- КОНЕЦ ФУНКЦИИ: search_product_by_barcode_with_suggestion ---
+# --- НАЧАЛО ФУНКЦИИ: handle_vkusvill_search ---
+async def handle_vkusvill_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки 'Искать во ВкусВилл'."""
+    query = update.callback_query
+    await query.answer()
+    
+    barcode = query.data.split('_')[2]
+    product_name = context.user_data.get('off_product_name')
+    
+    if not product_name:
+        await query.edit_message_text("❌ Не удалось найти название продукта.")
+        return ConversationHandler.END
+    
+    # Поиск во ВкусВилл по названию
+    await query.edit_message_text(f"🛒 Ищу КБЖУ продукта '{product_name}' во ВкусВилл...")
+    vkusvill_products = await search_vkusvill_by_name(product_name)
+    
+    if vkusvill_products:
+        # Показываем найденные продукты
+        context.user_data['api_products'] = vkusvill_products
+        await query.edit_message_text(
+            f"🛒 Найдено во ВкусВилл:",
+            reply_markup=None
+        )
+        # Показываем список продуктов
+        return await show_product_list(update, context, vkusvill_products, "vkusvill")
+    else:
+        await query.edit_message_text("❌ Продукт не найден во ВкусВилл. Введите КБЖУ вручную.")
+        return MANUAL_ENTRY
+# --- КОНЕЦ ФУНКЦИИ: handle_vkusvill_search ---
 
 # --- ПОИСК ПО ШТРИХ-КОДУ ---
 async def search_by_barcode(update: Update, context: ContextTypes.DEFAULT_TYPE, barcode: str):
@@ -456,6 +551,7 @@ async def select_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ENTER_PRODUCT
 
+# --- НАЧАЛО ФУНКЦИИ: enter_product ---
 async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
     print("📩 ПОЛУЧЕНО СООБЩЕНИЕ")
@@ -488,7 +584,7 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             barcode = decoded_objects[0].data.decode('utf-8')
             print(f"📷 Распознан штрих-код: {barcode}")
-            return await search_by_barcode(update, context, barcode)
+            return await search_product_by_barcode_with_suggestion(update, context, barcode)
         except Exception as e:
             print(f"❌ Ошибка: {e}")
             await update.message.reply_text("❌ Ошибка обработки фото.")
@@ -496,6 +592,9 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     product_name = update.message.text.strip()
     print(f"📩 Текст: {product_name}")
+    
+    # Сохраняем запрос для повторного поиска
+    context.user_data['current_search_query'] = product_name
 
     # 1. Локальная БД
     print("🔍 ПОИСК В ЛОКАЛЬНОЙ БАЗЕ")
@@ -505,7 +604,7 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await show_product_list(update, context, local_products, "local")
         return result
 
-    # 2. ВкусВилл
+    # 2. ВкусВилл (по названию)
     print("🛒 ПОИСК В ВКУСВИЛЛ")
     await update.message.reply_text("🛒 Ищу во ВкусВилл...")
     vkusvill_products = await search_vkusvill_by_name(product_name)
@@ -516,7 +615,18 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await show_product_list(update, context, vkusvill_products, "vkusvill")
         return result
 
-    # 3. DeepSeek
+    # 3. Open Food Facts (как резерв)
+    print("🌐 ПОИСК В OPEN FOOD FACTS")
+    await update.message.reply_text("🌐 Ищу в Open Food Facts...")
+    off_products = await db.search_product_by_name(product_name)
+    
+    if off_products:
+        print(f"🌐 Найдено в Open Food Facts: {len(off_products)}")
+        context.user_data['api_products'] = off_products
+        result = await show_product_list(update, context, off_products, "openfoodfacts")
+        return result
+
+    # 4. DeepSeek (как последний резерв)
     print("🤖 ПОИСК В DEEPSEEK")
     await update.message.reply_text("🤖 Ищу через DeepSeek...")
     deepseek_products = await db.search_product_by_deepseek(product_name)
@@ -526,7 +636,7 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await show_product_list(update, context, deepseek_products, "deepseek")
         return result
     
-    # 4. Ручной ввод
+    # 5. Ручной ввод
     print("❌ ПРОДУКТ НЕ НАЙДЕН")
     keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu_back")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -538,7 +648,9 @@ async def enter_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data['product_name'] = product_name
     return MANUAL_ENTRY
+# --- КОНЕЦ ФУНКЦИИ: enter_product ---
 
+# --- НАЧАЛО ФУНКЦИИ: show_product_list ---
 async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, products, source):
     print(f"📋 ПОКАЗ СПИСКА ({source})")
     
@@ -546,6 +658,7 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     source_text = {
         "local": "📦 Найдено в вашей базе данных",
         "vkusvill": "🛒 Найдено во ВкусВилл",
+        "openfoodfacts": "🌐 Найдено в Open Food Facts",
         "deepseek": "🤖 Найдено через DeepSeek (примерные данные)"
     }.get(source, "📦 Найден продукт")
     
@@ -599,7 +712,8 @@ async def show_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         reply_markup=reply_markup
     )
     return SELECT_PRODUCT_FROM_LIST
-
+# --- КОНЕЦ ФУНКЦИИ: show_product_list ---
+# --- НАЧАЛО ФУНКЦИИ: select_product ---
 async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("=" * 50)
     print("🎯 ВЫБОР ПРОДУКТА")
@@ -625,7 +739,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ENTER_WEIGHT
     
-    # <-- ИСПРАВЛЕНО: Удаление с повторным поиском по штрих-коду
+    # Обработка кнопки "Удалить" с повторным поиском
     if query.data.startswith("delete_"):
         product_id = int(query.data.split('_')[1])
         print(f"🗑️ Удаление продукта ID={product_id}")
@@ -636,6 +750,7 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"✅ Продукт удалён из БД")
             
             barcode = context.user_data.get('current_barcode')
+            query_text = context.user_data.get('current_search_query')
             
             if barcode:
                 await query.edit_message_text(
@@ -643,7 +758,15 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "🔍 Ищем заново по штрих-коду..."
                 )
                 context.user_data.clear()
-                return await search_by_barcode(update, context, barcode)
+                return await search_product_by_barcode_with_suggestion(update, context, barcode)
+            elif query_text:
+                await query.edit_message_text(
+                    f"🗑️ Продукт удалён из вашей базы.\n"
+                    "🔍 Ищем заново по названию..."
+                )
+                context.user_data.clear()
+                # Запускаем повторный поиск по названию (вызываем enter_product)
+                return await enter_product(update, context)
             else:
                 await query.edit_message_text(
                     f"🗑️ Продукт удалён из вашей базы.\n"
@@ -736,6 +859,8 @@ async def select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("❌ Продукт не найден")
     await query.edit_message_text("❌ Ошибка: продукт не найден.")
     return ConversationHandler.END
+# --- КОНЕЦ ФУНКЦИИ: select_product ---
+
 
 async def manual_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query and update.callback_query.data == "menu_back":
@@ -1002,6 +1127,11 @@ def main():
 )
     
     app.add_handler(conv_handler)
+# --- НАЧАЛО: ДОБАВЛЕНИЕ НОВЫХ ОБРАБОТЧИКОВ ---
+app.add_handler(CallbackQueryHandler(handle_vkusvill_search, pattern='^vkusvill_search_'))
+app.add_handler(CallbackQueryHandler(manual_entry, pattern='^manual_entry$'))
+# --- КОНЕЦ: ДОБАВЛЕНИЕ НОВЫХ ОБРАБОТЧИКОВ ---
+    
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('history', history))
     app.add_handler(CommandHandler('week', week))
