@@ -1,3 +1,4 @@
+print("🚀 [0] bot.py загружается...", flush=True)
 import logging
 import csv
 import io
