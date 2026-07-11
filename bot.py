@@ -27,6 +27,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 print("🚀 [0.3] Логирование настроено.", flush=True)
+print("🚀 [0.4] Начинаю определять функции...", flush=True)
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def format_nutrition(name: str, weight: float, calories: float, 
@@ -1078,9 +1079,11 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filename=f"nutrition_{target_date.strftime('%Y-%m-%d')}.csv"
     )
     await show_main_menu(update, context)
+print("🚀 [0.5] Функции и обработчики определены.", flush=True)
 
 # --- ГЛАВНАЯ ФУНКЦИЯ ---
 def main():
+    print("🚀 [1] Вход в main()", flush=True)
     import sys
     import traceback
     import asyncio
