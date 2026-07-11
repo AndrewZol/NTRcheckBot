@@ -1128,9 +1128,9 @@ def main():
     
     app.add_handler(conv_handler)
     
-    # --- НОВЫЕ ОБРАБОТЧИКИ (с правильным отступом) ---
+    # --- НОВЫЕ ОБРАБОТЧИКИ ---
+    # Убираем лишний обработчик manual_entry, так как он уже есть в ConversationHandler
     app.add_handler(CallbackQueryHandler(handle_vkusvill_search, pattern='^vkusvill_search_'))
-    app.add_handler(CallbackQueryHandler(manual_entry, pattern='^manual_entry$'))
     # --- КОНЕЦ НОВЫХ ОБРАБОТЧИКОВ ---
     
     app.add_handler(CommandHandler('start', start))
