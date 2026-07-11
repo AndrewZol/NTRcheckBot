@@ -253,14 +253,15 @@ async def search_vkusvill_by_name(product_name: str):
     try:
         search_url = "https://mcp001.vkusvill.ru/mcp"
         
-        # 1. Ищем продукты по названию (параметр q)
+        # 1. Ищем продукты по названию (согласно Tool Definition)
         search_payload = {
             "jsonrpc": "2.0",
             "method": "vkusvill_products_search",
             "params": {
                 "q": product_name,
                 "page": 1,
-                "sort": "popularity"
+                "sort": "popularity",
+                "vvonly": 1  # Только товары ВкусВилл
             },
             "id": 1
         }
@@ -284,6 +285,11 @@ async def search_vkusvill_by_name(product_name: str):
                 if response.status == 200:
                     data = await response.json()
                     print(f"📥 Ответ API: {data}")
+                    
+                    # Проверяем наличие ошибки
+                    if 'error' in data:
+                        print(f"❌ Ошибка API: {data['error']}")
+                        return []
                     
                     # Извлекаем items из структуры ответа
                     result_data = data.get('result', {})
@@ -338,22 +344,18 @@ async def search_vkusvill_by_name(product_name: str):
                                         print(f"📊 Найден текст с КБЖУ: {nutrition_text[:100]}...")
                                         
                                         # Парсим КБЖУ из текста
-                                        # Ищем калории (первое число перед ккал)
                                         kcal_match = re.search(r'(\d+[.,]?\d*)\s*ккал', nutrition_text)
                                         if kcal_match:
                                             calories = float(kcal_match.group(1).replace(',', '.'))
                                         
-                                        # Ищем белки
                                         protein_match = re.search(r'белки\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
                                         if protein_match:
                                             protein = float(protein_match.group(1).replace(',', '.'))
                                         
-                                        # Ищем жиры
                                         fat_match = re.search(r'жиры\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
                                         if fat_match:
                                             fat = float(fat_match.group(1).replace(',', '.'))
                                         
-                                        # Ищем углеводы
                                         carbs_match = re.search(r'углеводы\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
                                         if carbs_match:
                                             carbs = float(carbs_match.group(1).replace(',', '.'))
@@ -361,7 +363,6 @@ async def search_vkusvill_by_name(product_name: str):
                                         print(f"✅ Распарсено КБЖУ: {calories} ккал, {protein}г б, {fat}г ж, {carbs}г у")
                                         break
                                 
-                                # Добавляем продукт в результаты, даже если КБЖУ не найдены
                                 results.append({
                                     'id': str(product_id),
                                     'name': item.get('name', 'Без названия'),
@@ -377,7 +378,6 @@ async def search_vkusvill_by_name(product_name: str):
                     
                     return results
                 else:
-                    # Пробуем прочитать тело ошибки
                     try:
                         error_body = await response.text()
                         print(f"❌ Тело ошибки: {error_body}")
