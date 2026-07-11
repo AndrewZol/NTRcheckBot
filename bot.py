@@ -253,28 +253,39 @@ async def search_vkusvill_by_name(product_name: str):
     try:
         search_url = "https://mcp001.vkusvill.ru/mcp"
         
-        # 1. Ищем продукты по названию
+        # 1. Ищем продукты по названию (параметр q)
         search_payload = {
             "jsonrpc": "2.0",
             "method": "vkusvill_products_search",
-            "params": [product_name, 1, "popularity"],  # q, page, sort
+            "params": {
+                "q": product_name,
+                "page": 1,
+                "sort": "popularity"
+            },
             "id": 1
         }
         
         print(f"📤 Поисковый запрос: {search_payload}")
         
         results = []
+        import re
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 search_url,
                 json=search_payload,
-                headers={"Content-Type": "application/json"}
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
             ) as response:
+                print(f"📥 Статус ответа: {response.status}")
+                
                 if response.status == 200:
                     data = await response.json()
                     print(f"📥 Ответ API: {data}")
                     
-                    # Проверяем, есть ли результат
+                    # Извлекаем items из структуры ответа
                     result_data = data.get('result', {})
                     items = result_data.get('items', [])
                     
@@ -294,16 +305,21 @@ async def search_vkusvill_by_name(product_name: str):
                         detail_payload = {
                             "jsonrpc": "2.0",
                             "method": "vkusvill_product_details",
-                            "params": [product_id],
+                            "params": {
+                                "id": product_id
+                            },
                             "id": idx + 2
                         }
                         
-                        print(f"📤 Запрос деталей для ID {product_id}: {detail_payload}")
+                        print(f"📤 Запрос деталей для ID {product_id}")
                         
                         async with session.post(
                             search_url,
                             json=detail_payload,
-                            headers={"Content-Type": "application/json"}
+                            headers={
+                                "Content-Type": "application/json",
+                                "Accept": "application/json"
+                            }
                         ) as detail_response:
                             if detail_response.status == 200:
                                 detail_data = await detail_response.json()
@@ -319,33 +335,33 @@ async def search_vkusvill_by_name(product_name: str):
                                 for prop in properties:
                                     if prop.get('name') == "Пищевая и энергетическая ценность в 100 г":
                                         nutrition_text = prop.get('value', '')
-                                        print(f"📊 Найден текст с КБЖУ: {nutrition_text}")
+                                        print(f"📊 Найден текст с КБЖУ: {nutrition_text[:100]}...")
                                         
                                         # Парсим КБЖУ из текста
-                                        # Ищем калории
-                                        import re
+                                        # Ищем калории (первое число перед ккал)
                                         kcal_match = re.search(r'(\d+[.,]?\d*)\s*ккал', nutrition_text)
                                         if kcal_match:
                                             calories = float(kcal_match.group(1).replace(',', '.'))
                                         
                                         # Ищем белки
-                                        protein_match = re.search(r'белки\s*(\d+[.,]?\d*)', nutrition_text)
+                                        protein_match = re.search(r'белки\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
                                         if protein_match:
                                             protein = float(protein_match.group(1).replace(',', '.'))
                                         
                                         # Ищем жиры
-                                        fat_match = re.search(r'жиры\s*(\d+[.,]?\d*)', nutrition_text)
+                                        fat_match = re.search(r'жиры\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
                                         if fat_match:
                                             fat = float(fat_match.group(1).replace(',', '.'))
                                         
                                         # Ищем углеводы
-                                        carbs_match = re.search(r'углеводы\s*(\d+[.,]?\d*)', nutrition_text)
+                                        carbs_match = re.search(r'углеводы\s*(\d+[.,]?\d*)', nutrition_text, re.IGNORECASE)
                                         if carbs_match:
                                             carbs = float(carbs_match.group(1).replace(',', '.'))
                                         
                                         print(f"✅ Распарсено КБЖУ: {calories} ккал, {protein}г б, {fat}г ж, {carbs}г у")
                                         break
                                 
+                                # Добавляем продукт в результаты, даже если КБЖУ не найдены
                                 results.append({
                                     'id': str(product_id),
                                     'name': item.get('name', 'Без названия'),
@@ -361,7 +377,12 @@ async def search_vkusvill_by_name(product_name: str):
                     
                     return results
                 else:
-                    print(f"❌ Ошибка HTTP: {response.status}")
+                    # Пробуем прочитать тело ошибки
+                    try:
+                        error_body = await response.text()
+                        print(f"❌ Тело ошибки: {error_body}")
+                    except:
+                        pass
                     return []
     except Exception as e:
         print(f"❌ Ошибка при поиске во ВкусВилл: {e}")
